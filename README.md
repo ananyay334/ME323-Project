@@ -34,7 +34,7 @@ python -m pytest -q            # 14 tests, ~1-2 min
    grid). Fill in anything measured on the day: `Hardness_HV`, `Ball_ID`,
    `Ambient_T_C`, `RH_pct`, and the actual `Load_N` / `Freq_Hz` if they differ.
    **`Freq_Hz` must be there — the CSV does not record it**, and it sets the sliding distance.
-2. Drop the TA's files into `data/raw/<Experiment_ID>/` (any file names):
+2. Drop the files into `data/raw/<Experiment_ID>/` (any file names):
    * the tribometer `.csv`
    * the WLI screenshot `.png` of the wear track
    * *(recommended)* a baseline scan of the same spot before sliding, named `…_t0s.png`,
