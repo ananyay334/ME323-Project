@@ -1,0 +1,9 @@
+numpy>=1.23
+pandas>=1.5
+scipy>=1.9
+matplotlib>=3.6
+pillow>=9.0
+pyyaml>=6.0
+pytest>=7.0
+# optional: reads colour-bar limits off the screenshot (also needs `brew install tesseract`)
+# pytesseract>=0.3

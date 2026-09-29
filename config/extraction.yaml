@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# Target-extraction settings (COF + wear rate).
+# Every value here can be overridden per run through data/run_sheet.csv
+# where a matching column exists (e.g. Stroke_mm, track_angle_deg).
+# ---------------------------------------------------------------------------
+
+paths:
+  raw_dir: data/raw                 # one sub-folder per Experiment_ID
+  run_sheet: data/run_sheet.csv     # DOE log (inputs + per-run overrides)
+  processed_dir: data/processed     # ML-ready tables are written here
+  reports_dir: reports/runs         # per-run QC figures + summary.json
+
+# --- Test geometry defaults (used when the run sheet leaves them blank) -----
+test:
+  stroke_mm: 6.25
+  # "full"      -> stroke_mm is the total travel of one pass (distance per cycle = 2*stroke)
+  # "amplitude" -> stroke_mm is the half-travel (distance per cycle = 4*stroke)
+  # CONFIRM WITH THE TA which one the tribometer's "stroke" setting means.
+  stroke_definition: full
+  ball_diameter_mm: 6.0
+  # Elastic constants for the Hertz contact estimate (steel ball on steel flat)
+  E_ball_GPa: 210
+  nu_ball: 0.30
+  E_flat_GPa: 190                   # maraging steel ~ 180-195 GPa
+  nu_flat: 0.30
+
+# --- Tribometer CSV --------------------------------------------------------
+csv:
+  # regex patterns used to find each channel in the header (case-insensitive)
+  columns:
+    step: '^step$'
+    t_step_s: 'timestamp'
+    recipe_step: 'recipestep'
+    fz_N: 'fz'
+    fx_N: '(^|\.)fx \(n\)|daq\.fx$'       # optional raw friction force channel
+    z_depth_mm: 'z depth'
+    cof: 'cof'
+  # sliding step: "auto" or an explicit RecipeStep number
+  sliding_step: auto
+
+# --- COF target ------------------------------------------------------------
+cof:
+  bin_s: 1.0                  # COF(t) series resolution for the time-resolved dataset
+  smooth_window_frac: 0.05    # rolling-mean window for steady-state detection (fraction of test)
+  min_smooth_window_s: 0.2
+  ref_last_frac: 0.5          # steady-state reference = last 50 % of the sliding period
+  rel_tol: 0.10               # band = max(rel_tol*ref, abs_tol, 2*robust std of last half)
+  abs_tol: 0.01
+  min_runin_frac: 0.02        # always drop at least this fraction at the start
+  max_runin_frac: 0.60        # if run-in looks longer than this -> flagged
+  trim_end_s: 0.0             # drop the final seconds (stop/deceleration transient)
+  checkpoints_s: [60, 150, 300, 450, 600]   # COF reported around these times (if reached)
+  checkpoint_window_s: 5
+  load_tolerance_frac: 0.05   # QC: measured Fz vs run-sheet Load_N
+
+# --- White-light-interferometer screenshot ---------------------------------
+wli:
+  # Field of view per objective (um). The screenshot footer (e.g. "I-10x WLI")
+  # is OCR'd to choose one; the run sheet can override with fov_x_um / fov_y_um.
+  fov_um:
+    "10x": [899.98, 562.49]
+  default_objective: "10x"
+  use_ocr: true               # needs `tesseract` + `pytesseract`; else fill cbar_min/max in run sheet
+  min_saturation: 0.30        # below -> overlay (white/grey/black text, markers)
+  min_value: 0.15
+  hue_margin_deg: 4           # hues outside the colour-bar range (+margin) -> overlay
+  bright_overlay_dv: 0.30     # pixel brighter than local median by this -> overlay line
+  mask_dilate_px: 1
+  clip_frac_warn: 0.002       # fraction of pixels at colour-bar ends -> clipping flag
+
+# --- Wear-scar measurement -------------------------------------------------
+wear:
+  track_angle_deg: auto       # sliding direction in the image, deg CCW from +x; or a number
+  angle_search_step_deg: 2.0
+  profile_smooth_px: 2.0
+  form_order: 2               # polynomial form removed outside the groove (1 = plane, 2 = quadratic)
+  detect_k_sigma: 3.0         # groove must be deeper than k * profile noise
+  edge_k_sigma: 1.0           # groove edges = where depth falls back to 1 * noise
+  min_depth_texture_mult: 1.0 # scar must also be deeper than this x the surface roughness (Sa)
+  min_width_um: 15.0
+  min_coverage_frac: 0.5      # use only cross-track positions averaged over >=50 % of track length
+  n_segments: 4               # along-track consistency check
+  max_segment_cv: 0.5
+  subtract_pileup: false      # true -> V uses (worn area - pile-up area)
+  # If a t = 0 s (baseline) scan of the same spot exists, measure on (worn - baseline):
+  # texture and specimen form cancel -> ~1 % accuracy even for shallow scars.
+  use_baseline_difference: true
