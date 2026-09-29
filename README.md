@@ -94,7 +94,7 @@ shading and overlays, and measured back:
 
 `reports/validation/synthetic_scar_60deg.png` shows one of these checks.
 
-## Things to settle with the TA before the campaign
+## gng we need to discuss this with TA
 
 1. **Stroke definition.** The DOE text uses V ≈ 4·stroke·f (i.e. stroke = half-travel)
    but eq. 3 uses S = 2·stroke·N (stroke = full travel). The two differ by a factor 2 in
