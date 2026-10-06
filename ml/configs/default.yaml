@@ -1,0 +1,247 @@
+# =============================================================================
+# ME 323 triboinformatics - ML framework configuration.
+#
+#   python -m ml.train --config ml/configs/default.yaml [--data synthetic|real] [--quick]
+#
+# Paths are relative to the project root. `--quick` deep-merges the `quick:` block
+# (bottom of this file) over everything else. The resolved config is saved with
+# every result folder (config_snapshot.yaml).
+# =============================================================================
+seed: 323
+n_jobs: -1                        # parallel CV tasks (joblib/loky); -1 = all cores
+
+# --------------------------------------------------------------------- data
+data:
+  source: real                    # used when --data is not given
+  real:
+    runs: data/processed/runs_targets.csv
+    timeseries: data/processed/cof_timeseries.csv
+    # Optional long table (Experiment_ID, t_s, Wear_Volume_mm3) of checkpoint scan volumes.
+    # tribo_extract does not write it yet (the volumes live in reports/runs/<ID>/wear_scans.csv);
+    # without it, Extension B compares against the measured eq.-4 fit at the checkpoint times.
+    checkpoints: data/processed/wear_checkpoints.csv
+    # >>> List the unseen operating points (Experiment_IDs) here. <<<
+    # They are removed before any CV/tuning and used only for the final test.
+    holdout_ids: []
+  synthetic:
+    runs: data/synthetic/runs_targets.csv
+    timeseries: data/synthetic/cof_timeseries.csv
+    checkpoints: data/synthetic/wear_checkpoints.csv
+    holdout_ids: [U01, U02, U03, U04, U05, U06]
+  drop_status: [error]
+  drop_id_prefixes: [TRIAL]
+  # Rows missing any of these cannot be placed in the design space -> dropped (logged).
+  design_columns: [Carbon_pct, Load_N, Freq_Hz]
+  # Candidate input columns; all-NaN / absent ones are dropped and logged.
+  input_columns: [Carbon_pct, Hardness_HV, Load_N, Freq_Hz, Stroke_mm, Speed_mps, sliding_time_s,
+                  Sliding_distance_m, Hertz_p_mean_MPa, Hertz_width_um, Ambient_T_C, RH_pct,
+                  Initial_Ra_um, Initial_Sa_um]
+  # The nominal DOE grid: used to warn about off-grid runs that are not in holdout_ids,
+  # and as the candidate pool of the active-learning simulation.
+  grid:
+    Carbon_pct: [0, 0.5, 1, 2]
+    Load_N: [2, 4, 6, 8, 10]
+    Freq_Hz: [2, 4, 6, 8, 10]
+
+# Wear_detected == False -> the wear is below the detection limit (censored), not zero.
+censoring:
+  mode: exclude                   # exclude | lod_half   (main analysis)
+  sensitivity: [lod_half]         # extra CV runs of the wear targets with these modes
+  sensitivity_models: [ridge, rf, gpr]
+
+# Target families -> targets. `--targets wear cof` selects families (or name targets directly).
+targets:
+  wear: [log10_k, log10_V]        # log10 of Specific_Wear_Rate_mm3_per_Nm / Wear_Volume_mm3
+  cof: [COF_ss_mean, COF_t]       # steady-state COF (per run) / COF(t) (per second)
+
+# --------------------------------------------------------------------- features
+features:
+  sets:
+    base: [Carbon_pct, Hardness_HV, Load_N, Freq_Hz]
+    physics: [Carbon_pct, Hardness_HV, Load_N, Freq_Hz, Speed_mps, Hertz_p_mean_MPa, PV]
+  optional_physics: [Initial_Ra_um, Ambient_T_C, RH_pct]   # appended to `physics` when logged
+  optional_min_coverage: 0.8      # ... for at least this fraction of the CV runs (else skipped)
+  use: [base, physics]            # compared for every model
+  # Plain OLS only: drop the later column of any pair with |r| above this, fitted per training
+  # fold (Speed_mps is an exact multiple of Freq_Hz at fixed stroke). Ridge keeps everything.
+  collinear_threshold: 0.995
+  time_encoding: both             # COF(t) time input: raw | log1p | both
+
+time_regime:
+  # Seconds per run used for *fitting* COF(t) models (half log-spaced to resolve running-in,
+  # half evenly spaced). Every second of the test runs is scored.
+  train_points_per_run: 40
+
+# --------------------------------------------------------------------- CV
+cv:
+  outer_folds: 5
+  inner_folds: 4
+  repeats: 2                      # outer CV repeated with different group shuffles
+  stratify: Carbon_pct            # deal each carbon level evenly across folds (group-level)
+  search_iter: 12                 # max random-search candidates per model (full grid if smaller)
+
+# --------------------------------------------------------------------- models
+# enabled: on/off.  params: fixed constructor args.  search: inner-CV search space
+#   [a, b, c] -> categorical;  {loguniform: [lo, hi]} / {uniform: [lo, hi]} / {randint: [lo, hi]}
+# max_points_per_run: extra thinning of COF(t) training rows for kernel methods.
+# tune_n_seeds: ensemble size used inside the inner loop (final fits use params.n_seeds).
+# search_iter / inner_folds: per-model overrides of the cv defaults (cheaper NN tuning).
+# params_time: overrides of params for the COF(t) regime only.
+models:
+  linear:
+    enabled: true
+  ridge:
+    enabled: true
+    search:
+      alpha: {loguniform: [1.0e-3, 1.0e+3]}
+  rf:
+    enabled: true
+    params: {n_estimators: 200}
+    search:
+      max_depth: [2, 3, 4, 6]
+      min_samples_leaf: [3, 5, 8]
+      max_features: [0.5, 0.8, 1.0]
+  xgb:
+    enabled: true
+    params: {n_estimators: 300, subsample: 0.8, colsample_bytree: 0.8}
+    search:
+      max_depth: [2, 3, 4]
+      min_child_weight: [2, 5, 10]
+      learning_rate: [0.03, 0.05, 0.1]
+      reg_lambda: {loguniform: [0.1, 10.0]}
+      reg_alpha: {loguniform: [1.0e-3, 1.0]}
+  svr:
+    enabled: true
+    max_points_per_run: 20        # large C / tiny epsilon on thousands of rows is very slow
+    search:                       # y is standardised, so epsilon is in units of std(y)
+      C: {loguniform: [0.1, 300.0]}
+      gamma: {loguniform: [1.0e-3, 3.0]}
+      epsilon: {loguniform: [1.0e-2, 0.5]}
+  gpr:                            # hyperparameters by marginal likelihood (no inner search)
+    enabled: true
+    max_points_per_run: 8         # COF(t): O(n^3) in training rows
+    params: {n_restarts_optimizer: 3, nu: 2.5}
+    params_time: {n_restarts_optimizer: 1}
+  mlp:
+    enabled: true
+    tune_n_seeds: 1
+    search_iter: 8
+    inner_folds: 3
+    params: {n_seeds: 5, epochs: 600, patience: 30, batch_size: 1024, lr: 3.0e-3, val_frac: 0.2}
+    search:
+      hidden: [[8], [16], [16, 16], [24, 12]]
+      dropout: [0.0, 0.1, 0.2]
+      weight_decay: {loguniform: [1.0e-5, 1.0e-2]}
+  kan:
+    enabled: true
+    tune_n_seeds: 1
+    search_iter: 8
+    inner_folds: 3
+    params: {n_seeds: 3, epochs: 600, patience: 30, batch_size: 1024, lr: 1.0e-2, spline_order: 3,
+             val_frac: 0.2, backend: native}
+    search:
+      hidden: [4, 6, 8]
+      grid_size: [3, 5, 8]
+      lamb: {loguniform: [1.0e-5, 1.0e-2]}
+      weight_decay: {loguniform: [1.0e-6, 1.0e-3]}
+  mt_mlp:                         # shared trunk + wear head + COF(t) head
+    enabled: true
+    tune_n_seeds: 1
+    search_iter: 8
+    inner_folds: 3
+    params: {n_seeds: 3, epochs: 300, patience: 40, batch_size: 1024, lr: 3.0e-3, embedding: 8,
+             val_frac: 0.2}
+    search:
+      trunk: [[16], [24], [16, 16]]
+      head: [[16], [8]]
+      dropout: [0.0, 0.1]
+      weight_decay: {loguniform: [1.0e-5, 1.0e-2]}
+      loss_weighting: [uncertainty, fixed]
+      w_wear: [0.5, 1.0, 2.0]     # used when loss_weighting == fixed (w_cof = 1)
+  mt_kan:
+    enabled: true
+    tune_n_seeds: 1
+    search_iter: 6
+    inner_folds: 3
+    params: {n_seeds: 3, epochs: 200, patience: 30, batch_size: 1024, lr: 1.0e-2, embedding: 6,
+             val_frac: 0.2, spline_order: 3}
+    search:
+      trunk: [[6], [8]]
+      head: [[6], [4]]
+      grid_size: [3, 5]
+      lamb: {loguniform: [1.0e-5, 1.0e-3]}
+      weight_decay: {loguniform: [1.0e-6, 1.0e-3]}
+      loss_weighting: [uncertainty, fixed]
+      w_wear: [0.5, 1.0, 2.0]
+  tabpfn:                         # wear only; skipped if `tabpfn` is not installed
+    enabled: true
+    params: {n_estimators: 8}
+  pysr:                           # optional symbolic regression (needs `pysr` + Julia)
+    enabled: false
+    params: {niterations: 40, maxsize: 20}
+
+# --------------------------------------------------------------------- final test
+final:
+  top_k: 2                        # best (model, feature set) pairs per target by CV RMSE
+  always_include: [gpr]           # also refit these (if they ran) for the unseen points
+  interval_level: 0.95
+
+# --------------------------------------------------------------------- interpretation
+interpret:
+  enabled: true
+  targets: [log10_k, COF_ss_mean]  # PDP / SHAP / GPR maps on these run-level targets
+  refit_models: [kan, xgb]        # also refit for interpretation (KAN functions, tree SHAP)
+  shap: true
+  shap_max_samples: 100
+  pdp_points: 25
+  map_points: 41                  # GPR uncertainty maps: grid resolution per axis
+  kan_plots: true
+  symbolic: true                  # PySR post-hoc (only if models.pysr.enabled and installed)
+  cof_curves: 6                   # example COF(t) curves (CV test runs) in the figures
+
+# --------------------------------------------------------------------- Extension A
+active_learning:
+  enabled: true                   # also run inside `python -m ml.train`
+  targets: [log10_k, COF_ss_mean]
+  features: [Carbon_pct, Load_N, Freq_Hz]   # design variables (hardness is not chosen)
+  n_seed: 16                      # space-filling seed (maximin Latin hypercube on the pool)
+  budget: 60                      # max conditions acquired (incl. the seed)
+  strategies: [variance, ucb, random]
+  kappa: 2.0                      # UCB: mu + kappa * sigma
+  sigma_stop: {log10_k: 0.05, COF_ss_mean: 0.008}   # stop when max latent sigma < this
+  repeats: 20
+  tolerance: 0.10                 # N_AL: first N with RMSE <= (1 + tol) x full-grid CV RMSE
+  random_seed_design: shared      # shared: random baseline starts from the same LHS seed | random
+  lhs_candidates: 50
+  gpr_restarts: 1
+
+# --------------------------------------------------------------------- Extension B
+trajectory:
+  enabled: true
+  models: [gpr, kan, rf, xgb]
+  feature_sets: [base, physics]
+  checkpoint_times_s: [0, 60, 150, 300, 450, 600]
+  tau_bound_s: 0.01               # tau_trans at/below this = fit hit its lower bound -> excluded
+  floor_decades: 3.0              # Vdot/dV_run > 3 decades below the median = at bound 0 -> excluded
+  n_curve_plots: 9
+
+# --------------------------------------------------------------------- --quick
+# Reduced search for a smoke test (< 5 min on a laptop CPU).
+quick:
+  cv: {outer_folds: 5, inner_folds: 2, repeats: 1, search_iter: 3}
+  targets: {wear: [log10_k], cof: [COF_ss_mean, COF_t]}
+  censoring: {sensitivity_models: [gpr]}
+  time_regime: {train_points_per_run: 24}
+  models:
+    rf: {params: {n_estimators: 100}}
+    xgb: {params: {n_estimators: 150}}
+    gpr: {params: {n_restarts_optimizer: 0}, max_points_per_run: 6}
+    svr: {max_points_per_run: 12}
+    mlp: {search_iter: 3, inner_folds: 2, params: {n_seeds: 5, epochs: 200, patience: 25}}
+    kan: {search_iter: 3, inner_folds: 2, params: {n_seeds: 2, epochs: 200, patience: 25}}
+    mt_mlp: {search_iter: 3, inner_folds: 2, params: {n_seeds: 2, epochs: 120, patience: 20}}
+    mt_kan: {search_iter: 3, inner_folds: 2, params: {n_seeds: 2, epochs: 120, patience: 20}}
+  final: {top_k: 1}
+  interpret: {shap_max_samples: 40, pdp_points: 12, map_points: 21, refit_models: [kan]}
+  active_learning: {repeats: 4, budget: 36}
+  trajectory: {models: [gpr, rf], feature_sets: [base]}

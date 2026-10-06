@@ -8,7 +8,7 @@ the ML framework that will live in `ml/`.
 ├── config/extraction.yaml      all thresholds + test defaults (stroke, ball, FOV, …)
 ├── data/
 │   ├── run_sheet.csv           DOE log: one row per Experiment_ID (inputs you control)
-│   ├── raw/<Experiment_ID>/    the files the TA hands over for that run
+│   ├── raw/<Experiment_ID>/    the files for that run
 │   └── processed/              ML-ready tables (written by the pipeline, don't edit)
 │       ├── runs_targets.csv    one row per run   → wear-rate regime (N ≈ 100)
 │       └── cof_timeseries.csv  one row per second → COF(t) regime (≈ 600 rows/run)
@@ -31,10 +31,10 @@ python -m pytest -q            # 14 tests, ~1-2 min
 ## Per-run workflow
 
 1. The run should already be in `data/run_sheet.csv` (R001–R100 are the 4×5×5 DOE
-   grid). Fill in anything measured on the day: `Hardness_HV`, `Ball_ID`,
+   grid). Fill in measured entries: `Hardness_HV`, `Ball_ID`,
    `Ambient_T_C`, `RH_pct`, and the actual `Load_N` / `Freq_Hz` if they differ.
    **`Freq_Hz` must be there — the CSV does not record it**, and it sets the sliding distance.
-2. Drop the TA's files into `data/raw/<Experiment_ID>/` (any file names):
+2. Drop the files into `data/raw/<Experiment_ID>/` (any file names):
    * the tribometer `.csv`
    * the WLI screenshot `.png` of the wear track
    * *(recommended)* a baseline scan of the same spot before sliding, named `…_t0s.png`,
@@ -94,7 +94,7 @@ shading and overlays, and measured back:
 
 `reports/validation/synthetic_scar_60deg.png` shows one of these checks.
 
-## Things to settle with the TA before the campaign
+## gng we need to discuss this with TA
 
 1. **Stroke definition.** The DOE text uses V ≈ 4·stroke·f (i.e. stroke = half-travel)
    but eq. 3 uses S = 2·stroke·N (stroke = full travel). The two differ by a factor 2 in
