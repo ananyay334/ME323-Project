@@ -98,7 +98,7 @@ shading and overlays, and measured back:
 
 1. **Stroke definition.** The DOE text uses V ≈ 4·stroke·f (i.e. stroke = half-travel)
    but eq. 3 uses S = 2·stroke·N (stroke = full travel). The two differ by a factor 2 in
-   speed and distance. Set `test.stroke_definition` in the config once the TA confirms
+   speed and distance. Set `test.stroke_definition` in the config after confirmation of
    what the machine's stroke setting means.
 2. **Take a baseline WLI scan at t = 0 of the same spot.** It is the cheapest accuracy gain available.
 3. **Raw height export.** If the WLI software can export the height matrix
