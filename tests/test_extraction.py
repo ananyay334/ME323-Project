@@ -128,10 +128,14 @@ def test_pipeline_end_to_end(tmp_path):
     runs = process_all(cfg, make_plots=False, log=lambda *a: None)
     r = runs.iloc[0]
     assert r["Wear_method"] == "baseline_difference"
-    V_true = areas[600] * 1e-6 * 6.25
+    sdef = cfg["test"]["stroke_definition"]
+    track_len = physics.distance_per_cycle_mm(6.25, sdef) / 2
+    V_true = areas[600] * 1e-6 * track_len
     assert r["Wear_Volume_mm3"] == pytest.approx(V_true, rel=0.03)
-    S = physics.sliding_distance_m(4, 6.25, r["sliding_time_s"])
+    S = physics.sliding_distance_m(4, 6.25, r["sliding_time_s"], sdef)
     assert r["Specific_Wear_Rate_mm3_per_Nm"] == pytest.approx(r["Wear_Volume_mm3"] / (2 * S))
     assert r["n_checkpoints"] == 3
     ts = pd.read_csv(tmp_path / "processed" / "cof_timeseries.csv")
     assert {"Experiment_ID", "Time_s", "COF", "Carbon_pct", "Load_N", "Freq_Hz"} <= set(ts.columns)
+    wt = pd.read_csv(tmp_path / "processed" / "wear_trajectory.csv")
+    assert (wt["Experiment_ID"] == "R001").sum() == 3

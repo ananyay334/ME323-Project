@@ -15,8 +15,8 @@ test:
   stroke_mm: 6.25
   # "full"      -> stroke_mm is the total travel of one pass (distance per cycle = 2*stroke)
   # "amplitude" -> stroke_mm is the half-travel (distance per cycle = 4*stroke)
-  # CONFIRM WITH THE TA which one the tribometer's "stroke" setting means.
-  stroke_definition: full
+  # DOE: V = 4·Δx·f, S = 4·Δx·f·t  ->  stroke_mm is the amplitude Δx.
+  stroke_definition: amplitude
   ball_diameter_mm: 6.0
   # Elastic constants for the Hertz contact estimate (steel ball on steel flat)
   E_ball_GPa: 210
@@ -49,8 +49,8 @@ cof:
   min_runin_frac: 0.02        # always drop at least this fraction at the start
   max_runin_frac: 0.60        # if run-in looks longer than this -> flagged
   trim_end_s: 0.0             # drop the final seconds (stop/deceleration transient)
-  checkpoints_s: [60, 150, 300, 450, 600]   # COF reported around these times (if reached)
-  checkpoint_window_s: 5
+  checkpoints_s: [300, 600, 900, 1200, 1800, 2400]   # COF reported around these times (if reached)
+  checkpoint_window_s: 30
   load_tolerance_frac: 0.05   # QC: measured Fz vs run-sheet Load_N
 
 # --- White-light-interferometer screenshot ---------------------------------

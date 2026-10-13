@@ -1,65 +1,76 @@
-"""Train, evaluate and report everything in one command.
+"""Train, evaluate and report everything in one command (40-run DOE).
 
     python -m ml.train --config ml/configs/default.yaml [--data synthetic|real]
-                       [--targets wear cof] [--models gpr kan ...] [--quick]
+                       [--targets endpoint ...] [--models gpr svr ...] [--quick]
 
 Writes ``ml/results/<timestamp>_<data>[_quick]/`` with metrics.csv, predictions.csv,
-figures/, models/, the config snapshot and report.md. Switching between synthetic and
-real data needs no code changes: ``--data real`` reads ``data/processed/``.
+figures/, the config snapshot and report.md. Switching between synthetic and real data
+needs no code changes: ``--data real`` reads ``data/processed/``.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 
-from .config import (load_config, make_run_dir, save_snapshot, set_global_seeds, setup_logging)
-from .data import TARGETS, load_data
-from .evaluate import (JOINT_COF, JOINT_WEAR, CVResult, cross_validate, cross_validate_joint,
-                       final_refit, make_design, make_joint_design, select_final)
+from .config import ML_DIR, load_config, make_run_dir, save_snapshot, set_global_seeds, setup_logging
+from .data import TARGETS, load_data, target_frame
+from .evaluate import cross_validate, make_design, select_best
 from .features import check_physics_consistency
+from .metrics import replicate_noise_floor
 from .models.registry import select_models
-from .splits import plan_from_data
+from .splits import SplitPlan
 
 log = logging.getLogger("ml.train")
 
 
 def resolve_targets(cfg: dict, requested: list[str] | None) -> list[str]:
-    """Families (``wear``, ``cof``) and/or target names -> ordered list of target names."""
-    fam = cfg["targets"]
-    if not requested:
-        requested = list(fam)
+    """Regimes and/or target names -> ordered list of target names."""
+    reg = cfg["regimes"]
     out = []
-    for r in requested:
-        if r in fam:
-            out += fam[r]
-        elif r in TARGETS and TARGETS[r].family != "trajectory":
+    for r in requested or list(reg):
+        if r in reg:
+            out += reg[r]
+        elif r in TARGETS:
             out.append(r)
         else:
-            raise SystemExit(f"unknown target or family {r!r}; families: {list(fam)}, "
-                             f"targets: {[t for t in TARGETS if TARGETS[t].family != 'trajectory']}")
+            raise SystemExit(f"unknown regime or target {r!r}; regimes: {list(reg)}, "
+                             f"targets: {list(TARGETS)}")
     return list(dict.fromkeys(out))
 
 
+def readme_assumptions() -> list[str]:
+    """One-line assumptions listed under '## Assumptions' in ml/README.md."""
+    path = ML_DIR / "README.md"
+    if not path.exists():
+        return []
+    lines, on = [], False
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        if ln.startswith("## "):
+            on = ln.strip().lower() == "## assumptions"
+            continue
+        if on and ln.startswith("- "):
+            lines.append(ln[2:].strip())
+    return lines
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="ME 323 ML framework: nested group CV, final test, "
-                                             "interpretation, active learning, trajectory, report")
+    ap = argparse.ArgumentParser(description="ME 323 ML framework (40-run DOE): nested group CV "
+                                             "(gkf5 + LOAO), physics route, report")
     ap.add_argument("--config", default=None, help="YAML config (default ml/configs/default.yaml)")
-    ap.add_argument("--data", choices=["real", "synthetic"], default=None,
-                    help="data source (default: data.source in the config)")
-    ap.add_argument("--targets", nargs="+", default=None,
-                    help="target families (wear, cof) and/or names (log10_k, COF_ss_mean, ...)")
+    ap.add_argument("--data", choices=["real", "synthetic"], default=None)
+    ap.add_argument("--targets", nargs="+", default=None, help="regimes and/or target names")
     ap.add_argument("--models", nargs="+", default=None, help="restrict to these registry models")
-    ap.add_argument("--quick", action="store_true", help="reduced search: smoke test (< 5 min)")
+    ap.add_argument("--quick", action="store_true", help="one gkf5 repeat, inner 3 folds, first grid value")
     ap.add_argument("--n-jobs", type=int, default=None, help="parallel workers (-1 = all cores)")
     ap.add_argument("--out", default=None, help="results base folder (default ml/results)")
     ap.add_argument("--no-interpret", action="store_true")
-    ap.add_argument("--no-al", action="store_true", help="skip the active-learning simulation")
-    ap.add_argument("--no-trajectory", action="store_true")
     return ap.parse_args(argv)
 
 
@@ -70,12 +81,9 @@ def main(argv: list[str] | None = None) -> Path:
     if a.n_jobs is not None:
         cfg["n_jobs"] = a.n_jobs
     source = a.data or cfg["data"]["source"]
-    cfg["data"]["source_used"] = source
     setup_logging()
     set_global_seeds(cfg["seed"])
     n_jobs = int(cfg["n_jobs"])
-
-    # ---- data (before creating the results folder) ---------------------------
     try:
         data = load_data(cfg, source)
     except (FileNotFoundError, ValueError) as exc:
@@ -85,101 +93,76 @@ def main(argv: list[str] | None = None) -> Path:
     setup_logging(out / "run.log")
     for n in data.notes:
         log.info("data: %s", n)
-    save_snapshot(cfg, out, (["python", "-m", "ml.train"] + list(argv)) if argv is not None
-                  else ["python", "-m", "ml.train"] + sys.argv[1:])
+    save_snapshot(cfg, out, ["python", "-m", "ml.train"] + (list(argv) if argv is not None
+                                                            else sys.argv[1:]))
     log.info("results -> %s", out)
     for msg in check_physics_consistency(data.runs):
         data.note(msg, logging.WARNING)
+
     targets = resolve_targets(cfg, a.targets)
     specs, skipped = select_models(cfg, a.models)
-    single = [s for s in specs if s.regimes != ("joint",)]
-    joint = [s for s in specs if s.regimes == ("joint",)]
-    plan = plan_from_data(data.cv_runs, cfg)
-    main_mode = cfg["censoring"]["mode"]
-    fsets = cfg["features"]["use"]
-    log.info("targets %s | models %s | feature sets %s", targets, [s.name for s in specs], fsets)
-
-    # ---- nested group CV --------------------------------------------------
+    plan = SplitPlan(data.runs, cfg)
+    log.info("gkf5 seeds %s (offsets %s); LOAO folds %s", plan.seeds, plan.offsets, plan.loao_labels)
+    mode = cfg["censoring"]["mode"]
     designs, target_info = [], {}
     for t in targets:
-        for fs in fsets:
-            d = make_design(data, t, fs, cfg, main_mode)
+        for fs in cfg["features"]["use"]:
+            d = make_design(data, t, fs, cfg, mode)
             if d is None:
                 log.warning("target %s: no usable rows -> skipped", t)
                 break
             designs.append(d)
             target_info[t] = d.info
-    cv = cross_validate(designs, single, cfg, plan, n_jobs, "CV")
-    jt = tuple(t for t in (JOINT_WEAR, JOINT_COF) if t in targets)
-    if joint and jt:
-        jds = [j for j in (make_joint_design(data, fs, cfg, main_mode) for fs in fsets) if j is not None]
-        cv = cv.extend(cross_validate_joint(jds, joint, cfg, plan, n_jobs, jt))
-    sens_modes = [m for m in cfg["censoring"].get("sensitivity", []) if m != main_mode]
-    sens_names = set(cfg["censoring"].get("sensitivity_models", []))
-    sens_specs = [s for s in single if s.name in sens_names]
-    for mode in sens_modes:
-        sd = [make_design(data, t, fs, cfg, mode) for t in targets if TARGETS[t].censorable
-              for fs in fsets]
-        sd = [d for d in sd if d is not None]
-        if sd and sens_specs:
-            cv = cv.extend(cross_validate(sd, sens_specs, cfg, plan, n_jobs, f"CV censoring={mode}"))
+    log.info("targets %s | models %s | feature sets %s", list(target_info),
+             [s.name for s in specs], cfg["features"]["use"])
+    cv = cross_validate(designs, specs, cfg, plan, n_jobs, "CV")
+
+    route_params, route_choices = pd.DataFrame(), None
+    if cfg.get("physics_route", {}).get("enabled", True) and "log10_V_t" in target_info:
+        from .trajectory import physics_route
+        route, route_params = physics_route(data, cfg, plan, specs, n_jobs, mode)
+        cv = cv.extend(route)
+        if len(route.params):
+            cnt: dict = {}
+            for js in route.params["params"]:
+                for p, v in json.loads(js).items():
+                    cnt.setdefault(p, Counter())[v["model"]] += 1
+            route_choices = {p: dict(c) for p, c in cnt.items()}
     summary = cv.summary()
     if summary.empty:
-        log.error("no model produced results (models: %s; failures: %d) - see run.log",
-                  [s.name for s in specs], len(cv.failures))
+        log.error("no model produced results (failures: %d) - see run.log", len(cv.failures))
         pd.DataFrame(cv.failures).to_csv(out / "failures.csv", index=False)
         raise SystemExit(3)
+    best = select_best(summary)
+    noise = {}
+    for t in cfg["regimes"]["endpoint"]:
+        if t in target_info:
+            noise[t] = replicate_noise_floor(target_frame(data, t, mode)[0], cfg["data"]["replicate_pairs"])
+
     summary.to_csv(out / "metrics.csv", index=False)
     cv.fold_metrics.to_csv(out / "metrics_folds.csv", index=False)
     cv.predictions.to_csv(out / "predictions.csv", index=False)
-    if len(cv.predictions_time):        # ~1e6 rows: fast gzip, 6 significant digits
-        cv.predictions_time.to_csv(out / "predictions_timeseries.csv.gz", index=False,
-                                   float_format="%.6g",
-                                   compression={"method": "gzip", "compresslevel": 1})
-    if len(cv.params):
-        cv.params.to_csv(out / "hyperparameters.csv", index=False)
+    cv.params.to_csv(out / "hyperparameters.csv", index=False)
+    best.to_csv(out / "best_models.csv", index=False)
+    if len(route_params):
+        route_params.to_csv(out / "physics_route_params.csv", index=False)
+    if cv.failures:
+        pd.DataFrame(cv.failures).to_csv(out / "failures.csv", index=False)
 
-    # ---- final refit + unseen operating points ------------------------------
-    sel = select_final(summary, cfg, main_mode)
-    sel.to_csv(out / "final_selection.csv", index=False)
-    final = final_refit(data, cfg, plan, sel, cv, out / "models", n_jobs, main_mode)
-    if len(final.predictions):
-        final.predictions.to_csv(out / "holdout_predictions.csv", index=False)
-    if len(final.predictions_time):
-        final.predictions_time.to_csv(out / "holdout_predictions_timeseries.csv.gz", index=False,
-                                      float_format="%.6g",
-                                      compression={"method": "gzip", "compresslevel": 1})
-    if len(final.metrics):
-        final.metrics.to_csv(out / "holdout_metrics.csv", index=False)
-    failures = cv.failures + final.failures
-
-    # ---- interpretation / extensions ----------------------------------------
-    interp = al = traj = None
+    interp = None
     if cfg["interpret"].get("enabled", True) and not a.no_interpret:
         from .interpret import run_interpretation
-        interp = run_interpretation(data, cfg, cv, summary, final, out)
-    if cfg["trajectory"].get("enabled", True) and not a.no_trajectory:
-        from .trajectory import run_trajectory
-        traj = run_trajectory(data, cfg, plan, out / "trajectory", n_jobs, a.models)
-        if traj and "cv" in traj:
-            failures += traj["cv"].failures
-    if cfg["active_learning"].get("enabled", True) and not a.no_al:
-        from .active_learning import run_active_learning
-        al = run_active_learning(data, cfg, out / "active_learning", n_jobs, out / "figures")
-    if failures:
-        pd.DataFrame(failures).to_csv(out / "failures.csv", index=False)
+        interp = run_interpretation(data, cfg, cv.predictions, summary, best, route_params, out)
 
-    # ---- report ---------------------------------------------------------------
     from .report import write_report
     seconds = time.perf_counter() - t_start
     report = write_report(out, {
-        "cfg": cfg, "data": data, "summary": summary, "cv_predictions": cv.predictions,
-        "targets": targets, "target_info": target_info, "models_run": [s.name for s in specs],
-        "skipped": skipped, "failures": failures, "final": final, "interp": interp, "al": al,
-        "trajectory": traj, "seconds": seconds})
-    best = (summary[summary["censor_mode"] == main_mode].sort_values("RMSE_mean")
-            .groupby("target").head(1)[["target", "model", "feature_set", "R2_mean", "RMSE_mean"]])
-    log.info("best models by outer-fold RMSE:\n%s", best.to_string(index=False))
+        "cfg": cfg, "data": data, "summary": summary, "best": best, "plan": plan,
+        "target_info": target_info, "models_run": [s.name for s in specs], "skipped": skipped,
+        "failures": cv.failures, "noise": noise, "interp": interp, "route_choices": route_choices,
+        "assumptions": readme_assumptions(), "seconds": seconds})
+    log.info("selected models (lowest gkf5 RMSE, Ridge excluded):\n%s",
+             best.to_string(index=False))
     log.info("done in %.1f min -> %s", seconds / 60, report)
     return out
 

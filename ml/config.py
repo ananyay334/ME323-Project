@@ -108,7 +108,7 @@ def setup_logging(log_file: Path | None = None, level: int = logging.INFO) -> No
 
 
 def make_run_dir(base: Path | None = None, tag: str = "") -> Path:
-    """Create ``ml/results/<timestamp>[_tag]/`` (with figures/ and models/)."""
+    """Create ``ml/results/<timestamp>[_tag]/`` (with figures/)."""
     base = base or RESULTS_DIR
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = base / (f"{stamp}_{tag}" if tag else stamp)
@@ -117,7 +117,6 @@ def make_run_dir(base: Path | None = None, tag: str = "") -> Path:
         out = base / (f"{stamp}_{tag}_{i}" if tag else f"{stamp}_{i}")
         i += 1
     (out / "figures").mkdir(parents=True)
-    (out / "models").mkdir()
     return out
 
 
@@ -133,12 +132,12 @@ def package_versions() -> dict[str, str | None]:
     """Versions of core and optional dependencies (None = not installed)."""
     out: dict[str, str | None] = {"python": platform.python_version()}
     for name in ["numpy", "pandas", "scipy", "sklearn", "matplotlib", "yaml", "joblib",
-                 "torch", "xgboost", "shap", "efficient_kan", "kan", "tabpfn", "pysr"]:
+                 "torch", "xgboost", "tabpfn"]:
         if not has_module(name):
             out[name] = None
             continue
         try:
-            mod = __import__(name) if name not in ("pysr", "tabpfn") else None
+            mod = __import__(name) if name not in ("tabpfn", "torch") else None
             out[name] = getattr(mod, "__version__", "installed") if mod else "installed"
         except Exception:                                        # noqa: BLE001
             out[name] = "import-error"
@@ -187,11 +186,9 @@ def patch_loky_tracker_handoff() -> None:
     _spawn.get_preparation_data = get_preparation_data
 
 
-def data_paths(cfg: dict, source: str) -> dict[str, Path | list]:
-    """Paths and holdout IDs for ``source`` in {'real', 'synthetic'}."""
-    if source not in cfg["data"]:
+def data_paths(cfg: dict, source: str) -> dict[str, Path]:
+    """Input table paths for ``source`` in {'real', 'synthetic'}."""
+    if source not in ("real", "synthetic") or source not in cfg["data"]:
         raise ValueError(f"unknown data source {source!r}; expected one of 'real', 'synthetic'")
     d = cfg["data"][source]
-    return {"runs": resolve_path(d["runs"]), "timeseries": resolve_path(d["timeseries"]),
-            "checkpoints": resolve_path(d["checkpoints"]) if d.get("checkpoints") else None,
-            "holdout_ids": [str(x) for x in (d.get("holdout_ids") or [])]}
+    return {k: resolve_path(d[k]) for k in ("runs", "timeseries", "wear_trajectory")}

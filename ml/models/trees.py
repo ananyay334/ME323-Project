@@ -1,4 +1,4 @@
-"""Regularised tree ensembles: random forest and XGBoost (shallow trees, min leaf size)."""
+"""Regularised tree ensembles: random forest and XGBoost (depth <= 3, min leaf >= 3)."""
 from __future__ import annotations
 
 from sklearn.ensemble import RandomForestRegressor
@@ -23,7 +23,7 @@ def build_xgb(params: dict, seed: int, ctx: dict):
 
 
 SPECS = [
-    ModelSpec("rf", build_rf, "Random forest (shallow, min leaf size; tuned in nested CV)"),
-    ModelSpec("xgb", build_xgb, "XGBoost (shallow, L1/L2-regularised; tuned in nested CV)",
+    ModelSpec("rf", build_rf, "Random forest (depth <= 3, min leaf >= 3; grid in nested CV)"),
+    ModelSpec("xgb", build_xgb, "XGBoost (depth <= 3, min child weight >= 3, lr <= 0.05)",
               requires=("xgboost",)),
 ]

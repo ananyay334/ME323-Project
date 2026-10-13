@@ -1,15 +1,12 @@
 """Feature sets, derived features and leakage guards.
 
-* ``base``    : Carbon_pct, Hardness_HV, Load_N, Freq_Hz
-* ``physics`` : base + Speed_mps, Hertz_p_mean_MPa, PV (= p_mean x v), plus
-  Initial_Ra_um / Ambient_T_C / RH_pct when they are logged for enough runs.
-* COF(t) regime: the run features + a time encoding (Time_s and/or log1p(Time_s)).
+* ``base``    : Carbon_pct, Load_N, Freq_Hz (+ Hardness_HV if it has any non-null value)
+* ``physics`` : base + Speed_mps, Hertz_p_mean_MPa, PV (= Hertz_p_mean_MPa x Speed_mps)
+* regime time inputs: ``wear_checkpoints`` adds log10(Time_s); ``cof_time`` adds Time_s.
 
-With the stroke fixed, Speed_mps is an exact multiple of Freq_Hz and Hertz_p_mean_MPa
-a function of Load_N only, so the physics set adds no new design information; it
-changes the *representation* (e.g. the Hertz term is a concave transform of load).
-Plain OLS drops exactly collinear columns inside each training fold
-(:class:`ml.models.linear.DropCollinear`); every other model is regularised.
+With the stroke fixed, Speed_mps is an exact multiple of Freq_Hz and the Hertz pressure a
+function of Load_N only; the physics set changes the representation, not the information.
+Scaling and imputation are fitted inside each training fold (inside the estimators).
 """
 from __future__ import annotations
 
@@ -27,32 +24,23 @@ from .data import TARGETS, TriboData
 log = logging.getLogger("ml.features")
 
 DERIVED: dict[str, tuple[str, ...]] = {"PV": ("Hertz_p_mean_MPa", "Speed_mps")}
-TIME_ENCODINGS = {"raw": ["Time_s"], "log1p": ["log1p_Time_s"], "both": ["Time_s", "log1p_Time_s"]}
+TIME_INPUTS = {"wear_checkpoints": ["log10_Time_s"], "cof_time": ["Time_s"]}
 DESIGN = ["Carbon_pct", "Load_N", "Freq_Hz"]
 
 # Never model inputs: identifiers, the servo-Z diagnostic, and every target column.
-NEVER_INPUTS = ({"Zdepth_um", "Experiment_ID", "group", "is_holdout", "y", "censored", "y_lod",
-                 "status", "Replicate_of", "Wear_detected", "Phase", "COF_std"}
+NEVER_INPUTS = ({"Zdepth_um", "Experiment_ID", "group", "Specimen_ID", "y", "censored", "y_lod",
+                 "status", "Replicate_of", "Wear_detected", "Role", "Run_order"}
                 | {t.column for t in TARGETS.values()}
                 | {t.lod_column for t in TARGETS.values() if t.lod_column})
-# Per-run targets: time is an endpoint, not an input (also covers duration proxies).
-RUN_REGIME_FORBIDDEN = {"Time_s", "log1p_Time_s", "sliding_time_s", "Sliding_distance_m",
+# Run-level targets: time is an endpoint, not an input (also covers duration proxies).
+RUN_REGIME_FORBIDDEN = {"Time_s", "log10_Time_s", "sliding_time_s", "Sliding_distance_m",
                         "N_cycles"}
-
-
-_LOGGED: set[str] = set()
-
-
-def _log_once(msg: str, level: int = logging.INFO) -> None:
-    if msg not in _LOGGED:
-        _LOGGED.add(msg)
-        log.log(level, msg)
 
 
 def check_inputs(columns: list[str], regime: str) -> None:
     """Raise if a feature list contains a forbidden column for this regime."""
     bad = set(columns) & NEVER_INPUTS
-    if regime == "run":
+    if regime not in TIME_INPUTS:
         bad |= set(columns) & RUN_REGIME_FORBIDDEN
     if bad:
         raise ValueError(f"forbidden input column(s) for the {regime} regime: {sorted(bad)}")
@@ -64,43 +52,33 @@ def resolve_feature_set(name: str, data: TriboData, cfg: dict) -> list[str]:
     if name not in fcfg["sets"]:
         raise KeyError(f"unknown feature set {name!r}; defined: {list(fcfg['sets'])}")
     cols = list(fcfg["sets"][name])
-    if name == "physics":
-        cv = data.cv_runs
-        thr = fcfg.get("optional_min_coverage", 0.8)
-        for c in fcfg.get("optional_physics", []):
-            if c in data.inputs and c not in cols:
-                cov = float(cv[c].notna().mean())
-                if cov >= thr:
-                    cols.append(c)
-                else:
-                    _log_once(f"feature {c} logged for {100 * cov:.0f} % of runs "
-                              f"(< {100 * thr:.0f} %): not used")
+    for c in fcfg.get("optional_base", []):
+        if c in data.inputs and data.runs[c].notna().any() and c not in cols:
+            cols.insert(len(DESIGN), c)
     out = []
     for c in cols:
         need = DERIVED.get(c, (c,))
         if all(n in data.inputs for n in need):
             out.append(c)
         else:
-            _log_once(f"feature set {name}: {c} unavailable (needs {need}) -> skipped",
-                      logging.WARNING)
-    check_inputs(out, "run")
+            log.warning("feature set %s: %s unavailable (needs %s) -> skipped", name, c, need)
+    check_inputs(out, "endpoint")
     return out
 
 
-def time_columns(cfg: dict) -> list[str]:
-    enc = cfg["features"].get("time_encoding", "both")
-    if enc not in TIME_ENCODINGS:
-        raise ValueError(f"time_encoding must be one of {list(TIME_ENCODINGS)}, got {enc!r}")
-    return TIME_ENCODINGS[enc]
+def time_columns(regime: str) -> list[str]:
+    """Extra time input of a row-level regime (empty for run-level regimes)."""
+    return list(TIME_INPUTS.get(regime, []))
 
 
 def add_derived(df: pd.DataFrame) -> pd.DataFrame:
-    """Add derived features (PV, log1p time) to a copy of ``df`` where the inputs exist."""
+    """Add derived features (PV, log10 time) to a copy of ``df`` where the inputs exist."""
     df = df.copy()
     if {"Hertz_p_mean_MPa", "Speed_mps"} <= set(df.columns):
         df["PV"] = df["Hertz_p_mean_MPa"] * df["Speed_mps"]
     if "Time_s" in df:
-        df["log1p_Time_s"] = np.log1p(df["Time_s"].astype(float))
+        t = df["Time_s"].astype(float)
+        df["log10_Time_s"] = np.log10(t.where(t > 0))
     return df
 
 

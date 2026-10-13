@@ -1,24 +1,24 @@
-"""ml - modelling framework for the ME 323 triboinformatics project.
+"""ml - modelling framework for the ME 323 triboinformatics project (40-run DOE).
 
-Reads only the ML-ready tables written by ``tribo_extract`` (``data/processed/``) or
-their synthetic stand-ins (``data/synthetic/``), and trains, evaluates and reports
-models for steady-state COF, COF(t) and the specific wear rate.
+Reads only the ML-ready tables written by ``tribo_extract`` (``data/processed/``) or their
+synthetic stand-ins (``data/synthetic/``).
 
 Modules
 -------
-config           configuration loading, seeding, logging, run snapshots
-data             load + clean the two input tables, censoring, holdout
-features         feature sets, derived features, leakage guards
-splits           group definitions and deterministic (nested) group K-fold
-metrics          regression / interval metrics, run-level aggregation of COF(t)
-models           model registry and model implementations
-evaluate         nested group CV, joint (multi-task) CV, final refit + holdout test
-interpret        SHAP, partial dependence, KAN functions, GPR maps, calibration
-active_learning  retrospective active-learning DOE simulation (Extension A)
-trajectory       time-resolved wear trajectory parameters (Extension B)
-synthetic        synthetic tables in the exact pipeline schema
-report           auto-generated report.md
-train            CLI entry point
+config      configuration loading, seeding, logging, run snapshots
+data        load + clean the input tables; the four regimes; censoring
+features    feature sets, derived features, leakage guards
+splits      groups, gkf5 (repeated stratified group K-fold) and leave-one-alloy-out
+metrics     regression / interval metrics, replicate noise floor
+tuning      fixed grids, inner-CV tuning
+models      model registry (GPR, TabPFN, SVR, RF, XGBoost, Ridge)
+evaluate    nested CV over gkf5 + LOAO, model selection
+trajectory  physics route: eq.-1 parameters -> V_w(t) on the checkpoint rows
+interpret   report figures
+synthetic   synthetic tables in the exact pipeline schema
+report      auto-generated report.md
+train       CLI entry point
+archive/    excluded by the DOE (MLP, KAN, multi-task, PySR, active learning); not imported
 """
 import os as _os
 

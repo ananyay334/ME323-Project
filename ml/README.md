@@ -1,253 +1,112 @@
-# ml/ — model framework
+# ml/ — model framework (40-run DOE)
 
-Trains, evaluates and reports models for **steady-state COF**, **COF(t)** and the
-**specific wear rate** (log10 k) of carbon-modified maraging steel, from the tables
-written by `tribo_extract`. `ml/` only *reads* `data/processed/` (or its synthetic
-stand-in `data/synthetic/`). It never writes there.
-
-```bash
-python -m ml.synthetic                                   # synthetic tables -> data/synthetic/
-python -m ml.train --data synthetic --quick              # smoke test, ~2-3 min on a laptop
-python -m pytest ml/tests -q                             # ~1.5 min
-```
-
-When the campaign data has been extracted:
+Trains, cross-validates and reports models for the ME 323 maraging-steel DOE: 4 grades
+(S1–S4 = 0 / 0.5 / 1 / 2 % C), 40 runs of 2400 s (10 tracks per specimen), in-situ WLI scans
+at 0/300/600/900/1200/1800/2400 s. `ml/` only *reads* `data/processed/` (or the synthetic
+stand-in `data/synthetic/`).
 
 ```bash
-python -m tribo_extract extract                          # -> data/processed/*.csv
-# put the unseen operating points under data.real.holdout_ids in ml/configs/default.yaml
-python -m ml.train --data real                           # full run, ~20 min (timings below)
+python -m ml.synthetic                                   # synthetic inputs -> data/synthetic/
+python -m ml.train --data synthetic --quick              # smoke test (< 5 min)
+python -m ml.train --data real                           # after `python -m tribo_extract extract`
+python -m pytest ml/tests -q
 ```
 
-Everything lands in `ml/results/<timestamp>_<data>[_quick]/report.md`. Switching
-from `--data synthetic` to `--data real` needs no code changes.
-
-## Checklist for when the real data arrives
-
-1. `python -m tribo_extract extract`, then look at `status`, `issues`, `*_flags` in
-   `data/processed/runs_targets.csv`.
-2. Make sure every replicate run has `Replicate_of` filled in the run sheet. Otherwise
-   it is treated as an independent group, and the loader warns about conditions run twice
-   without it.
-3. List the 5–10 unseen operating points under `data.real.holdout_ids`. The loader
-   warns about off-grid runs that are not listed.
-4. `python -m ml.train --data real --quick` as a smoke test, then the full run.
+Results: `ml/results/<timestamp>_<data>[_quick]/` with `metrics.csv` (mean ± std per
+regime × target × model × feature set × split), `metrics_folds.csv`, `predictions.csv`
+(out-of-fold), `hyperparameters.csv`, `best_models.csv`, `physics_route_params.csv`,
+`figures/`, `interpretation/`, `config_snapshot.yaml`, `environment.json`, `run.log`,
+`report.md`.
 
 ## CLI
 
 ```
-python -m ml.train --config ml/configs/default.yaml [--data synthetic|real]
-                   [--targets wear cof] [--models gpr kan ...] [--quick]
-                   [--n-jobs N] [--out DIR] [--no-interpret] [--no-al] [--no-trajectory]
-python -m ml.active_learning --config ml/configs/default.yaml [--data ...] [--quick]
+python -m ml.train [--config ml/configs/default.yaml] [--data synthetic|real]
+                   [--targets endpoint wear_checkpoints ...] [--models gpr svr ...]
+                   [--quick] [--n-jobs N] [--out DIR] [--no-interpret]
 python -m ml.synthetic [--out data/synthetic] [--seed 323]
 ```
 
-* `--targets` takes families (`wear` = `log10_k`, `log10_V`; `cof` = `COF_ss_mean`,
-  `COF_t`) or target names.
-* `--models` restricts to registry names: `linear ridge rf xgb svr gpr mlp kan mt_mlp mt_kan tabpfn pysr`.
-* `--quick` merges the config's `quick:` block over it: 1 repeat, inner 2-fold,
-  3 candidates per model, fewer epochs, ensembles and AL repetitions. It is a smoke test,
-  not a result.
+`--quick` = one gkf5 repeat, inner 3 folds, first value of each grid list.
 
-## Layout
+## Data regimes
 
-```
-ml/
-  configs/default.yaml  every setting: data paths, holdout IDs, censoring mode, feature sets,
-                        models on/off + search spaces, CV folds/repeats, AL, trajectory, quick
-  config.py             config loading, seeds, logging, run snapshot
-  data.py               load + clean tables, target definitions, censoring, holdout split
-  features.py           feature sets, PV / log1p(time), leakage guards, physics-consistent inputs
-  splits.py             groups (Replicate_of) and deterministic nested group K-fold
-  metrics.py            R², RMSE, MAE, linear-k errors, interval coverage, calibration
-  tuning.py             search spaces, inner-CV tuning
-  evaluate.py           nested CV, joint (multi-task) CV, final refit + unseen points
-  models/  registry.py  linear.py trees.py svr.py gpr.py mlp.py kan.py multitask.py
-           tabpfn_model.py symbolic.py _torch.py (shared NN training)
-  interpret.py          SHAP, partial dependence, KAN functions, GPR maps, Archard check
-  active_learning.py    Extension A (also a CLI)
-  trajectory.py         Extension B
-  plotting.py           figure style (validated palette)
-  report.py             report.md
-  synthetic.py          synthetic tables (CLI)
-  train.py              CLI entry point
-  tests/                schema, leakage, reproducibility, models, synthetic recovery, CLI
-  results/<timestamp>/  (gitignored) metrics.csv, metrics_folds.csv, predictions.csv,
-                        predictions_timeseries.csv.gz, hyperparameters.csv, holdout_*.csv,
-                        final_selection.csv, figures/, models/, interpretation/,
-                        active_learning/, trajectory/, config_snapshot.yaml,
-                        environment.json, run.log, report.md
-```
+| regime | source | rows | targets | extra input |
+|---|---|---|---|---|
+| `endpoint` | runs_targets.csv | 40 | log10 k, log10 V_w(t_end), COF_ss_mean | – |
+| `trajectory_params` | runs_targets.csv | ≤ 40 (runs with an eq.-1 fit) | log10 V̇_steady, log10 ΔV_run, log10 τ_trans | – |
+| `wear_checkpoints` | wear_trajectory.csv | ≤ 240 (t > 0) | log10 V_w(t) | log10(Time_s) |
+| `cof_time` | cof_timeseries.csv → 120-s bins | ≤ 800 | mean COF per bin | Time_s (bin end) |
 
-## Inputs and data rules
+Run-level columns are joined from runs_targets.csv on `Experiment_ID`. `status == "error"`,
+`TRIAL*` and rows lacking the target are excluded. `Wear_detected == False` is censoring:
+excluded by default, LOD/2 with `censoring.mode: lod_half`; the report lists the count per
+target. Feature sets: `base` = Carbon_pct, Load_N, Freq_Hz (+ Hardness_HV when logged);
+`physics` = base + Speed_mps, Hertz_p_mean_MPa, PV. Scaling and imputation are fitted inside
+training folds only.
 
-| table | grain | used for |
+## Validation
+
+* Group = `Replicate_of` if set, else `Experiment_ID` (each centre replicate pair is one group).
+* `gkf5`: `StratifiedGroupKFold(5, shuffle=True)` stratified by `Specimen_ID`, one repeat per
+  seed in `[0, 1, 2, 3, 4]`; every fold holds 8 runs (asserted, redrawn with the next seed
+  offset otherwise).
+* `loao`: one fold per held-out specimen (grade).
+* Row-level regimes use the run-level folds. Tuning is nested: inner `GroupKFold(4)` on the
+  training groups.
+* Model selection: lowest gkf5 RMSE, Ridge excluded (reference). LOAO is reported, not used.
+
+## Models (registry: `ml/models/registry.py`)
+
+| model | role | settings |
 |---|---|---|
-| `runs_targets.csv` | 1 row per run | `log10_k`, `log10_V`, `COF_ss_mean`, eq.-4 trajectory parameters |
-| `cof_timeseries.csv` | 1 row per second | `COF_t` (only `Experiment_ID, Time_s, COF, Phase` are read; run inputs are joined from the runs table) |
-| `wear_checkpoints.csv` | optional, 1 row per scan | Extension B comparison (`Experiment_ID, t_s, Wear_Volume_mm3`) |
+| `gpr` | primary | Constant × Matérn-5/2 (ARD, bounds 1e-2–1e3) + White(1e-2, 1e-6–1), normalize_y, 5 restarts, standardised X; mean + std |
+| `tabpfn` | primary benchmark | defaults, CPU, no tuning; skipped loudly ("not run") if not installed |
+| `svr` | | RBF; C {0.1, 1, 10, 100}, gamma {scale, 0.01, 0.1, 1}, epsilon {0.01, 0.05, 0.1}; y standardised |
+| `rf` | | 300 trees; max_depth {2, 3}, min_samples_leaf {3, 5}, max_features {1.0, sqrt} |
+| `xgb` | | n_estimators {200, 500}, max_depth {2, 3}, learning_rate {0.02, 0.05}, min_child_weight {3, 5}, subsample 0.8, reg_lambda 1 |
+| `ridge` | reference only | alpha {0.1, 1, 10} |
 
-* Drop `status == "error"` and IDs starting with `TRIAL`. `partial` rows are kept and
-  used only for the targets they have.
-* Absent or all-NaN input columns are dropped and logged. Rows missing carbon, load or
-  frequency are dropped and logged. Other missing inputs (e.g. one unmeasured hardness)
-  are median-imputed inside each training fold.
-* `Wear_detected == False` means censored, not zero. By default these runs are excluded
-  from the wear targets (`censoring.mode: exclude`). A sensitivity run imputes LOD/2
-  (`censoring.sensitivity`).
-* Wear is modelled as log10. COF is modelled untransformed.
-* `Zdepth_um` is discarded on load. A guard (`features.check_inputs`) rejects it, any
-  target column, and any duration proxy (`Time_s`, `sliding_time_s`,
-  `Sliding_distance_m`, `N_cycles`) as an input for the per-run targets.
+Every model runs on every regime and both feature sets. MLP, KAN, multi-task networks, PySR
+and the active-learning simulation are excluded by the DOE and live in `ml/archive/`
+(not imported, not tested, not registered).
 
-## Leakage rules (enforced and tested)
+**Physics route** (`ml/trajectory.py`): in every gkf5 fold the best `trajectory_params` model
+(by inner CV) predicts the eq.-1 parameters of the test runs;
+`tribo_extract.physics.two_stage_wear` rebuilds V_w(t), which is scored on that fold's
+`wear_checkpoints` rows next to the direct models.
 
-* **Group K-fold everywhere.** Group = `Replicate_of` (followed to the root of a
-  chain), else `Experiment_ID`. Folds are assigned per group from a seeded shuffle,
-  stratified by carbon level. The same group→fold map serves every target, feature set
-  and model, so comparisons are paired and the seconds of a run share its fold.
-* **Nested CV.** Hyperparameters are chosen on inner group folds inside the outer
-  training set. Outer folds are only for reporting and model selection.
-* **In-fold preprocessing.** Imputers, scalers, the collinearity filter and the NN
-  standardisation are all fitted inside the estimator on the training rows only.
-* **Unseen points.** They are removed in `load_data` before any split exists. A holdout
-  ID takes its whole replicate group with it.
-* Tests: `test_leakage.py` asserts disjoint groups in every outer and inner split. It also
-  runs a canary: a random value per run is unlearnable under group CV (R² < 0.1) but
-  learnable under a row-level split (R² > 0.8), which shows the test can detect leakage.
+## Report contents
 
-## Features
+R², RMSE, MAE (mean ± std) for gkf5 and LOAO; the noise floor (pooled SD of the centre pairs
+R03/R04, R13/R14, R23/R24, R33/R34) next to every endpoint RMSE; LOAO error per held-out grade;
+GPR 95 % coverage and calibration. Figures: parity of the best model per target, GPR response
+surface (mean, σ) over Load × Freq per carbon level, GPR ARD length scales, LOAO per-grade
+errors, trajectory reconstructions for one run per grade, GPR calibration.
 
-`base` = carbon, hardness, load, frequency. `physics` = base + speed, Hertz mean
-pressure, PV, plus Ra / ambient T / RH when logged for ≥ 80 % of runs. Both sets are
-run for every model. At fixed stroke, speed is an exact multiple of frequency: plain OLS
-drops it in-fold (`DropCollinear`), and the other models are regularised. COF(t) adds
-`Time_s` and `log1p(Time_s)` (`features.time_encoding`).
+## Assumptions
 
-## Models
-
-| name | targets | notes |
-|---|---|---|
-| `linear` | all | OLS, collinear columns dropped in-fold |
-| `ridge` | all | alpha tuned |
-| `rf`, `xgb` | all | shallow trees, min leaf size / child weight, L1/L2; tuned |
-| `svr` | all | RBF; C, γ, ε tuned (y standardised) |
-| `gpr` | all (primary for wear) | ARD Matérn-5/2 + white noise, normalize_y; hyperparameters by marginal likelihood; predictive std |
-| `mlp` | COF(t), wear | 1–2 layers < 32 units, AdamW weight decay, dropout, group-aware early stopping, 5-seed ensemble |
-| `kan` | COF(t), wear, trajectory | [n_in, 4–8, 1], cubic B-spline edges, grid + L1/entropy reg. tuned; learned functions plotted |
-| `mt_mlp`, `mt_kan` | COF(t) + log10 k jointly | shared trunk → wear head (once per run) + COF head (trunk embedding + time); uncertainty-weighted or fixed weights (tuned) |
-| `tabpfn` | wear | optional (`pip install tabpfn`) |
-| `pysr` | wear | optional, off by default (`pip install pysr` + Julia) |
-
-Missing optional packages mean the model is skipped with a warning and listed in the
-report. CPU only. Torch runs single-threaded per task, and the parallelism is across CV
-tasks (joblib).
-
-**Adding a model:** write `ml/models/<name>.py` with
-`SPECS = [ModelSpec("<name>", build_fn, ...)]`, where `build_fn(params, seed, ctx)`
-returns an sklearn-style estimator with `fit/predict` and optionally `predict_std`. Then
-add the module to `MODEL_MODULES` in `models/registry.py` and give it a
-`models: <name>:` block in the config. Splits, tuning, metrics, final test and report
-need no changes.
-
-## Evaluation and outputs
-
-* Per target: R², RMSE, MAE on outer folds (mean ± std over folds and repeats), plus the
-  pooled out-of-fold R². For log10 targets there are also linear-k errors (RMSE, MAE,
-  median % error, multiplicative factor).
-* For models with a std (GPR, NN ensembles, TabPFN): 95 % coverage, interval width,
-  NLL, and calibration curves.
-* COF(t) is scored per second, and as `COF_t@ss`, the predicted curve averaged over each
-  held-out run's steady phase, comparable with `COF_ss_mean`.
-* **Final test.** For each target, the `top_k` (model, feature set) by CV RMSE plus
-  `final.always_include` / `interpret.refit_models` are re-tuned by group CV on all CV
-  data, refit, and used to predict the unseen points. Intervals are Gaussian where a
-  model has a std, and otherwise the 95 % quantile of that model's out-of-fold errors.
-* **Interpretation.** SHAP (trees exact, others model-agnostic); partial dependence of
-  load (per carbon level), carbon and frequency, with a linear-vs-curved verdict; KAN
-  learned functions; GPR mean/uncertainty maps over load × frequency per carbon level;
-  an Archard exponent check (log10 V on log10 F, log10 S).
-* **Extension A** (`active_learning.py`). Pool = grid conditions. The seed is a maximin
-  LHS snapped to the pool; GPR surrogate; variance or UCB acquisition vs random; stop at
-  the budget or when max σ < ε. Learning curves over ≥ 20 repetitions, and N_AL vs the
-  full-grid model within a tolerance.
-* **Extension B** (`trajectory.py`). log10 of the eq.-4 parameters is modelled by group
-  CV, and V(t) is rebuilt with `tribo_extract.physics.two_stage_wear` against the
-  measured checkpoints. The module does nothing when those columns are absent.
-
-## Assumptions (also listed in every report)
-
-1. **Groups and replicates.** A replicate is identified only by `Replicate_of`. A
-   condition run twice without it is treated as two groups (with a warning).
-2. **Selection.** Only by held-out outer-fold RMSE. Ties are not broken by complexity.
-3. **Censoring sensitivity.** The LOD/2 run is scored on detected runs only, so it is
-   comparable with the main run. The report adds the fraction of censored runs predicted
-   below their LOD.
-4. **COF(t) training rows.** Models are fitted on `time_regime.train_points_per_run`
-   seconds per run (half log-spaced, so the running-in is resolved), and kernel methods
-   on fewer (`max_points_per_run`). All seconds are scored. `COF_t@ss` uses the
-   extraction's `Phase` labels.
-5. **Uncertainty.** NN ensemble std = sqrt(ensemble variance + mean validation MSE),
-   i.e. epistemic plus an aleatoric estimate. GPR std includes the fitted noise. The GPR
-   uncertainty maps and the AL acquisition use the *latent* (noise-free) std.
-6. **Physically consistent inputs.** Partial dependence, maps and AL set carbon, load and
-   frequency, and recompute speed and Hertz pressure with `tribo_extract.physics`.
-   Hardness follows the mean of its carbon level. SHAP with an independent masker does
-   not respect this coupling, so read it as "shared credit" between carbon and hardness.
-7. **KAN.** A native torch implementation of the efficient-KAN layer, so only torch is
-   needed. `models.kan.params.backend: efficient_kan` switches to that package if it is
-   installed. pykan is not wired in: its training API differs and changes between
-   versions.
-8. **AL design variables.** Carbon, load and frequency on the nominal grid (hardness is
-   measured, not chosen). Replicates are averaged per condition. The random baseline
-   starts from the same LHS seed (`random_seed_design: shared`) so that only the
-   acquisition differs. The stop point is recorded, but curves continue to the budget.
-9. **Extension B QC rule.** Parameters pinned at a bound of the extraction's fit
-   (τ ≤ 0.01 s, or V̇ / ΔV more than 3 decades below the median) are excluded from that
-   parameter's model and counted.
-10. **Synthetic data** (`ml/synthetic.py`) runs through `tribo_extract.cof.extract_cof`
-    and `physics.fit_wear_trajectory`, so its targets follow the pipeline's definitions.
-    The planted effects are in `data/synthetic/planted_effects.json`. It also writes
-    `wear_checkpoints.csv`, a table the extraction does not produce yet.
-
-## Findings from the synthetic dry run that matter for the campaign
-
-* **τ_trans is not identifiable from checkpoints at 0/60/150/300/450/600 s** when the
-  running-in lasts tens of seconds. Only one scan falls inside the transient, so the eq.-4
-  fit often pins τ at its bound. V̇_steady and ΔV_run are recovered well, and so is the
-  curve as a whole. Adding scans at about 15 and 30 s would fix τ_trans.
-* For a direct V(t) comparison in Extension B, the per-scan volumes (currently in
-  `reports/runs/<ID>/wear_scans.csv`) would need exporting to
-  `data/processed/wear_checkpoints.csv`. Without that table the module compares against
-  the measured eq.-4 fit instead.
-
-## Timings (Apple-silicon laptop, 8 cores)
-
-| command | time |
-|---|---|
-| `python -m ml.synthetic` | ~4 s |
-| `python -m ml.train --data synthetic --quick` | ~2–3 min |
-| `python -m ml.train --data synthetic` (full: 4 targets × 2 feature sets × 10 models, 5×2 outer folds, nested tuning, sensitivity, final test, interpretation, AL with 20 repetitions, trajectory) | ~20 min |
-| `python -m pytest ml/tests -q` | ~1.5 min |
-
-In the full run about a third of the CV compute goes to the COF(t) models (kernel methods
-and networks on per-second rows). `--targets wear` or `--models ...` give faster focused
-runs.
-
-## Dependencies
-
-Core: numpy, pandas, scipy, scikit-learn, matplotlib, pyyaml, joblib, torch (MLP, KAN,
-multi-task), xgboost, shap. Optional: `tabpfn`, `pysr` (+ Julia), `efficient_kan`. Each
-is skipped with a warning if missing. See `requirements.txt`.
-
-**OpenMP note (macOS).** torch and xgboost each bundle their own OpenMP runtime. Two
-runtimes running multi-threaded in one process segfault (reproduced with the conda
-torch 2.12 / xgboost 3.1 builds). `import ml` therefore sets `OMP_NUM_THREADS=1` unless
-you set it yourself. This costs nothing here, because the parallelism is across CV tasks
-(joblib) and every model fits single-threaded. In a notebook, `import ml` before torch or
-xgboost so that the cap takes effect. A regression test covers this
-(`test_torch_and_xgboost_coexist_in_one_process`).
-
-Plotting uses pyplot-free `Figure` objects inside an `rc_context`, so importing the
-package changes neither the matplotlib backend nor your global style.
+- Run_order: `numpy.random.default_rng(323)`, one `permutation(10) + 1` per specimen in the order S1→S4, assigned to the runs in table order.
+- The TRIAL row of data/run_sheet.csv is unchanged except for two empty trailing fields for the new Role and Run_order columns.
+- wear_trajectory.csv is built from reports/runs/<ID>/wear_scans.csv after each successful process_run, so a stale file from an earlier extraction of the same run would also be read.
+- Pre-existing OCR test failure: tesseract 5.5 truncated a colour-bar label at ×3 scale, so `_ocr_number` now tries ×4–×6 before ×3 (tribo_extract/wli.py).
+- gkf5 with fewer than 40 usable runs requires floor/ceil(n/5) runs per fold; redraws use random_state = seed + 1000·k, up to 500 tries.
+- Folds are built once from all usable runs; a target that excludes runs (censored, no eq.-1 fit) keeps that run→fold map, so its folds can hold fewer than 8 runs.
+- cof_time bins end at ceil(Time_s/120)·120; bins with fewer than 60 s of data are dropped.
+- wear_checkpoints drops the t = 0 baseline scan; censored scans are excluded or imputed exactly like censored endpoints.
+- A missing Specimen_ID is filled with one specimen per carbon level.
+- Hardness_HV joins both feature sets when it has any non-null value.
+- With a single grid candidate (GPR, TabPFN, every model in --quick) no inner fits are run.
+- GPR fits on more than 400 training rows (cof_time) are memory-bandwidth bound, so they run in at most `cv.heavy_task_slots` (3) sequential chains while other tasks fill the remaining workers; results are unchanged.
+- GPR hyperparameters use L-BFGS-B with ftol 1e-6 / gtol 1e-4 instead of sklearn's ~2e-9 (same optimum to 4 digits, about 2× faster); kernel, bounds and the 5 restarts are as specified.
+- The GPR log marginal likelihood and gradient are evaluated by `FastLML` (same kernel, sklearn's 1e-10 jitter, restart starting points drawn as in sklearn; matches sklearn to 1e-6 / 1e-3, tested) and the result is fitted by sklearn with `optimizer=None`; about 3× faster.
+- Physics route: each selectable model is tuned on the inner folds and the one with the lowest inner RMSE at its best grid point is chosen (tuning and choice share the inner folds); it predicts every test run that has checkpoint scans, including runs without an eq.-1 fit.
+- The physics route is reported next to the direct models but is not eligible as "best model".
+- Noise floor = sqrt(mean over pairs of (a − b)²/2) on the modelled scale (log10 for wear); a pair is skipped if either run lacks the target.
+- GPR response surfaces use the base feature set and a GPR fitted on all usable runs (description, not evaluation); σ excludes the fitted white noise, whose SD is printed in the title.
+- LOAO per-grade error bars are 95 % bootstrap intervals (200 resamples) of the RMSE over the held-out grade's runs, each model at its best LOAO feature set.
+- Trajectory figure runs are the anchor_center run of each specimen (R03, R13, R23, R33), out-of-fold from gkf5 repeat 0.
+- Coverage is reported for every model with a predictive std (GPR, TabPFN).
+- The "unseen operating points" final refit was removed with the holdout logic, so results folders no longer contain models/.
+- requirements.txt keeps torch because TabPFN depends on it; tabpfn itself stays an optional commented line.
+- Synthetic data: the four inputs are runs_targets.csv, cof_timeseries.csv, wear_trajectory.csv and run_sheet.csv; COF is simulated at 10 Hz before extract_cof's 1 Hz binning; τ_trans is planted at about 200–450 s and replicate pairs share one specimen hardness.

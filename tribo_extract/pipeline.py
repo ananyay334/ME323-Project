@@ -32,7 +32,7 @@ RUN_SHEET_COLUMNS = [
     "Experiment_ID", "Carbon_pct", "Hardness_HV", "Load_N", "Freq_Hz", "Stroke_mm", "Duration_s",
     "Ball_diam_mm", "Ball_ID", "Specimen_ID", "Replicate_of", "Ambient_T_C", "RH_pct",
     "Initial_Ra_um", "cbar_min_um", "cbar_max_um", "fov_x_um", "fov_y_um", "track_angle_deg",
-    "sliding_step", "Notes",
+    "sliding_step", "Notes", "Role", "Run_order",
 ]
 # column order of runs_targets.csv: id -> inputs/features -> targets -> details/QC
 LEAD_COLUMNS = [
@@ -293,7 +293,8 @@ def process_all(cfg: dict, only: list[str] | None = None, make_plots: bool = Tru
     run_dirs = sorted(d for d in raw.iterdir() if d.is_dir() and not d.name.startswith((".", "_")))
     if only:
         run_dirs = [d for d in run_dirs if d.name in only]
-    rows, series = [], []
+    rows, series, trajectories = [], [], []
+    reports = Path(cfg["paths"]["reports_dir"])
     for d in run_dirs:
         if not any(d.iterdir()):
             continue                               # empty placeholder folder
@@ -301,6 +302,15 @@ def process_all(cfg: dict, only: list[str] | None = None, make_plots: bool = Tru
             r, ts = process_run(d, sheet_map.get(d.name, {}), cfg, make_plots)
             log(f"[{r['status']:>7}] {d.name}  COF_ss={r.get('COF_ss_mean', float('nan')):.4f}  "
                 f"k={r.get('Specific_Wear_Rate_mm3_per_Nm', float('nan')):.3e}  {r['issues']}")
+            scans = reports / d.name / "wear_scans.csv"
+            if scans.exists():                     # per-checkpoint wear volumes -> wear_trajectory.csv
+                ws = pd.read_csv(scans)
+                keep = {"t_s": "Time_s", "volume_mm3": "Wear_Volume_mm3",
+                        "volume_LOD_mm3": "Wear_Volume_LOD_mm3", "wear_detected": "Wear_detected",
+                        "wear_method": "Wear_method"}
+                ws = ws[[c for c in keep if c in ws.columns]].rename(columns=keep)
+                ws.insert(0, "Experiment_ID", d.name)
+                trajectories.append(ws)
         except Exception as exc:                   # noqa: BLE001
             r, ts = {"Experiment_ID": d.name, "status": "error", "issues": repr(exc)}, None
             log(f"[  error] {d.name}: {exc}")
@@ -326,6 +336,13 @@ def process_all(cfg: dict, only: list[str] | None = None, make_plots: bool = Tru
             old = pd.read_csv(out / "cof_timeseries.csv", dtype={"Experiment_ID": str})
             cts = pd.concat([old[~old["Experiment_ID"].isin(cts["Experiment_ID"])], cts])
         cts.sort_values(["Experiment_ID", "Time_s"]).to_csv(out / "cof_timeseries.csv", index=False)
+    if trajectories:
+        wt = pd.concat(trajectories, ignore_index=True)
+        if only and (out / "wear_trajectory.csv").exists():
+            old = pd.read_csv(out / "wear_trajectory.csv", dtype={"Experiment_ID": str})
+            wt = pd.concat([old[~old["Experiment_ID"].isin(wt["Experiment_ID"])], wt])
+        wt.sort_values(["Experiment_ID", "Time_s"]).to_csv(out / "wear_trajectory.csv", index=False)
     log(f"\nwrote {out / 'runs_targets.csv'} ({len(runs)} runs)"
-        + (f" and {out / 'cof_timeseries.csv'}" if series else ""))
+        + (f" and {out / 'cof_timeseries.csv'}" if series else "")
+        + (f" and {out / 'wear_trajectory.csv'}" if trajectories else ""))
     return runs

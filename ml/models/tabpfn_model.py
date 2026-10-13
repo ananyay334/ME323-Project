@@ -1,7 +1,8 @@
-"""TabPFN regressor: a small-N specialist benchmark for the wear targets only.
+"""TabPFN regressor: primary small-N benchmark (defaults, CPU, no tuning).
 
-Needs ``pip install tabpfn`` (v2+, which provides ``TabPFNRegressor``); the first fit
-downloads the model weights. Missing package -> the model is skipped with a warning.
+Needs ``pip install tabpfn`` (v2+, provides ``TabPFNRegressor``; the first fit downloads
+the model weights). Missing package -> the model is skipped with a loud warning and
+marked "not run" in the report.
 """
 from __future__ import annotations
 
@@ -12,17 +13,15 @@ from .registry import ModelSpec
 
 
 class TabPFNModel(BaseEstimator, RegressorMixin):
-    """Thin wrapper (numpy in, CPU only); ``predict_std`` from predicted quantiles if available."""
+    """Thin wrapper (numpy in, CPU, library defaults); ``predict_std`` from predicted quantiles."""
 
-    def __init__(self, n_estimators: int = 8, random_state: int = 0, device: str = "cpu"):
-        self.n_estimators = n_estimators
+    def __init__(self, random_state: int = 0, device: str = "cpu"):
         self.random_state = random_state
         self.device = device
 
-    def fit(self, X, y, groups=None):
+    def fit(self, X, y):
         from tabpfn import TabPFNRegressor                     # optional dependency
-        self.model_ = TabPFNRegressor(n_estimators=self.n_estimators, device=self.device,
-                                      random_state=self.random_state)
+        self.model_ = TabPFNRegressor(device=self.device, random_state=self.random_state)
         self.model_.fit(np.asarray(X, np.float32), np.asarray(y, np.float32))
         return self
 
@@ -43,5 +42,5 @@ def build_tabpfn(params: dict, seed: int, ctx: dict):
     return TabPFNModel(random_state=seed, **params)
 
 
-SPECS = [ModelSpec("tabpfn", build_tabpfn, "TabPFN (small-N benchmark, wear only)",
-                   regimes=("run",), families=("wear",), requires=("tabpfn",), has_std=True)]
+SPECS = [ModelSpec("tabpfn", build_tabpfn, "TabPFN (primary benchmark; defaults, CPU, no tuning)",
+                   requires=("tabpfn",), has_std=True)]

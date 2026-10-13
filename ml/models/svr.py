@@ -1,4 +1,4 @@
-"""Support-vector regression with an RBF kernel (C, gamma, epsilon tuned)."""
+"""Support-vector regression with an RBF kernel (C, gamma, epsilon from a fixed grid)."""
 from __future__ import annotations
 
 from sklearn.compose import TransformedTargetRegressor
@@ -12,7 +12,7 @@ from .registry import ModelSpec
 
 def build_svr(params: dict, seed: int, ctx: dict):
     # y is standardised (inside the fold) so epsilon / C mean the same for every target
-    params.setdefault("cache_size", 500)          # MB of kernel cache: faster on COF(t) rows
+    params.setdefault("cache_size", 500)          # MB of kernel cache
     inner = Pipeline([("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler()),
                       ("model", SVR(kernel="rbf", **params))])
     return TransformedTargetRegressor(regressor=inner, transformer=StandardScaler())

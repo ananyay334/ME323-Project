@@ -30,10 +30,9 @@ CMAP_MEAN = LinearSegmentedColormap.from_list("seq_blue", BLUE_RAMP)
 CMAP_SD = LinearSegmentedColormap.from_list("seq_orange", ORANGE_RAMP)
 
 # colour follows the entity: a model keeps its slot in every figure
-MODEL_SLOT = {"gpr": 0, "mlp": 1, "kan": 2, "mt_mlp": 3, "mt_kan": 4, "tabpfn": 5,
-              "xgb": 6, "rf": 7}
+MODEL_SLOT = {"gpr": 0, "tabpfn": 1, "svr": 2, "rf": 3, "xgb": 4, "ridge": 5,
+              "physics_route": 6}
 FS_SLOT = {"base": 0, "physics": 1}
-STRATEGY_SLOT = {"variance": 0, "ucb": 1, "random": 2}
 
 
 def model_color(name: str) -> str:

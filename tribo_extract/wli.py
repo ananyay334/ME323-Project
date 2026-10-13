@@ -64,7 +64,7 @@ def _ocr_number(img: Image.Image, box) -> float | None:
     before the last two digits.
     """
     reads = []
-    for scale in (3, 4, 5, 6):
+    for scale in (4, 5, 6, 3):        # x3 first can yield 3 agreeing truncated reads (tesseract 5.5)
         for dy0, dy1 in ((0, 0), (2, -1), (1, 0)):
             b = (box[0], box[1] + dy0, box[2], box[3] + dy1)
             t = _ocr(img, b, scale=scale).replace(" ", "")
