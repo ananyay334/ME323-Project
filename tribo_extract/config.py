@@ -31,4 +31,9 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
     for key, val in cfg.get("paths", {}).items():
         p = Path(val)
         cfg["paths"][key] = p if p.is_absolute() else PROJECT_ROOT / p
+    # per-run file layout (config/file_layout.yaml) -> cfg["layout"]
+    lay = cfg.get("paths", {}).get("file_layout")
+    if lay is not None and Path(lay).exists():
+        with open(lay, "r", encoding="utf-8") as fh:
+            cfg["layout"] = _deep_merge(yaml.safe_load(fh) or {}, cfg.get("layout") or {})
     return cfg

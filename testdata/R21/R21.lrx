@@ -1,0 +1,17 @@
+<?xml version="1.0" standalone="yes"?>
+<TribologyRecipeSummary>
+  <Steps StepKey="0" StepName="" StepType="0" LoopFromStep="0">
+    <StepDetail>1&gt; Fz:47.5 N,  t:0.16667 min
+None
+</StepDetail>
+  </Steps>
+  <Steps StepKey="1" StepName="" StepType="0" LoopFromStep="0">
+    <StepDetail>2&gt; Fz:47.5 N,  t:1.8 min
+R - Continuous
+Frequency (Hz): 7
+Acceleration (s): 1
+Deceleration (s): 1
+None
+</StepDetail>
+  </Steps>
+</TribologyRecipeSummary>

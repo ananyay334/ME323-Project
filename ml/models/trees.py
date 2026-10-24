@@ -1,17 +1,7 @@
-"""Regularised tree ensembles: random forest and XGBoost (depth <= 3, min leaf >= 3)."""
+"""Shallow XGBoost (depth 1-2, min child weight >= 2, lr <= 0.05, subsample 0.8)."""
 from __future__ import annotations
 
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-
 from .registry import ModelSpec
-
-
-def build_rf(params: dict, seed: int, ctx: dict):
-    params.setdefault("n_jobs", 1)               # parallelism is across CV tasks
-    return Pipeline([("impute", SimpleImputer(strategy="median")),
-                     ("model", RandomForestRegressor(random_state=seed, **params))])
 
 
 def build_xgb(params: dict, seed: int, ctx: dict):
@@ -23,7 +13,6 @@ def build_xgb(params: dict, seed: int, ctx: dict):
 
 
 SPECS = [
-    ModelSpec("rf", build_rf, "Random forest (depth <= 3, min leaf >= 3; grid in nested CV)"),
-    ModelSpec("xgb", build_xgb, "XGBoost (depth <= 3, min child weight >= 3, lr <= 0.05)",
+    ModelSpec("xgb", build_xgb, "XGBoost, shallow (max_depth 1-2; grid in nested CV)",
               requires=("xgboost",)),
 ]

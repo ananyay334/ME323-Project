@@ -396,3 +396,147 @@ def subtract_baseline(worn: HeightMap, base: HeightMap, max_shift_px: int = 60):
     info = {"baseline_shift_px": [dy, dx],
             "baseline_residual_ratio": float(np.nanstd(diff) / max(np.nanstd(a), 1e-12))}
     return hm, info
+
+
+# ---------------------------------------------------------------------------
+# rough-surface track measurement ("band" method)
+# ---------------------------------------------------------------------------
+def _band_plane(z: np.ndarray, use: np.ndarray) -> np.ndarray:
+    ny, nx = z.shape
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    ok = use & np.isfinite(z)
+    A = np.c_[xx[ok], yy[ok], np.ones(ok.sum())]
+    c, *_ = np.linalg.lstsq(A, z[ok], rcond=None)
+    return c[0] * xx + c[1] * yy + c[2]
+
+
+def _row_roughness(z: np.ndarray, win: int) -> np.ndarray:
+    """Std of the high-passed height along each row (= along the track), smoothed across rows."""
+    valid = np.isfinite(z)
+    zf = np.where(valid, z, 0.0)
+    num = ndi.uniform_filter(zf, win)
+    den = ndi.uniform_filter(valid.astype(float), win)
+    hp = np.where(valid, z - num / np.maximum(den, 1e-9), np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        r = np.nanstd(hp, axis=1)
+    return ndi.gaussian_filter1d(np.nan_to_num(r, nan=np.nanmedian(r)), 3)
+
+
+def measure_track_band(hm: HeightMap, cfg: dict) -> tuple[dict, dict]:
+    """Wear track on a rough surface: a smooth, flattened band with pile-up ridges.
+
+    The 304 plates are rough (Sa ~ 3 um) and the worn track sits only ~1 um below the
+    mean surface, so a "groove deeper than the roughness" test fails, but the track is
+    4-6x smoother than the unworn surface. Steps:
+
+    1. local roughness per row along the track (tracks run along plate X = image x;
+       ``wear.band.track_axis: auto`` picks the axis with more roughness contrast);
+    2. core = rows smoother than halfway between unworn and track roughness;
+       band = core +/- ``band_extend`` x core width, tightened to the outer foot of each
+       pile-up ridge (where the mean profile returns to the reference);
+    3. reference = plane fitted to the unworn pixels outside the band (the mean plane of
+       the rough surface, so the areas are a true material balance);
+    4. mean height across the track (averaged over the whole track length in view):
+       groove = area below the reference inside the band, pile-up = area above it.
+
+    Returns ``(result, internals)`` with the keys of :func:`measure_wear_scar`.
+    """
+    b = cfg["wear"].get("band", {})
+    z = hm.z - _band_plane(hm.z, np.ones_like(hm.z, bool))
+    dx, dy = hm.dx_um, hm.dy_um
+    axis = b.get("track_axis", "x")
+    win = int(b.get("hp_window_px", 15))
+    if axis == "auto":
+        axis = "x" if np.ptp(_row_roughness(z, win)) >= np.ptp(_row_roughness(z.T, win)) else "y"
+    if axis == "y":
+        z, dx, dy = z.T, dy, dx
+    rough = _row_roughness(z, win)
+    n = len(rough)
+    e = max(int(b.get("edge_frac", 0.15) * n), 5)
+    R_un = float(np.median(np.r_[rough[:e], rough[-e:]]))
+    R_tr = float(np.percentile(rough, 5))
+    contrast = (R_un - R_tr) / R_un if R_un > 0 else 0.0
+    out = {"track_angle_deg": 0.0 if axis == "x" else 90.0, "track_angle_source": f"band_axis_{axis}",
+           "contrast": contrast, "rough_unworn_um": R_un, "rough_track_um": R_tr, "px_um": dx}
+    flags: list[str] = []
+    if contrast < b.get("min_contrast", 0.3):
+        out.update({"wear_detected": False, "worn_area_um2": 0.0, "area_LOD_um2": np.nan,
+                    "wear_flags": "no_track_found"})
+        return out, {"z": z, "rough": rough, "dx": dx, "dy": dy}
+    thr = R_tr + b.get("core_level", 0.5) * (R_un - R_tr)
+    i0 = int(np.argmin(rough))
+    L = R = i0
+    while L > 0 and rough[L - 1] < thr:
+        L -= 1
+    while R < n - 1 and rough[R + 1] < thr:
+        R += 1
+    ext = int(b.get("band_extend", 0.4) * (R - L + 1))
+    bL, bR = max(L - ext, 0), min(R + ext, n - 1)
+    if bL == 0 or bR == n - 1:
+        flags.append("track_touches_fov_edge")
+    outside = np.ones(n, bool)
+    outside[bL:bR + 1] = False
+    if outside.sum() < 0.15 * n:
+        flags.append("little_unworn_reference")
+    # the levelling plane needs unworn surface on BOTH sides of the track; with one side only
+    # its across-track tilt is extrapolated and the groove / pile-up areas are meaningless
+    min_side = int(np.ceil(b.get("min_reference_um", 110.0) / dy))
+    one_sided = outside[:bL].sum() < min_side or outside[bR + 1:].sum() < min_side
+    if one_sided:
+        flags.append("reference_one_sided")
+    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        prof = np.nanmean(zl, axis=1)
+    sm0 = ndi.gaussian_filter1d(prof, 3)
+    if R < bR:                                     # right ridge foot
+        p = R + int(np.argmax(sm0[R:bR + 1]))
+        if sm0[p] > 0:
+            while p < bR and sm0[p] > 0:
+                p += 1
+            bR = p
+        else:
+            bR = R
+    if L > bL:                                     # left ridge foot
+        p = bL + int(np.argmax(sm0[bL:L + 1]))
+        if sm0[p] > 0:
+            while p > bL and sm0[p] > 0:
+                p -= 1
+            bL = p
+        else:
+            bL = L
+    # second pass: level again on everything outside the final band (it ends at the ridge feet,
+    # beyond which the surface is unworn) -> more reference surface, smaller tilt error
+    margin = int(np.ceil(b.get("ref_margin_um", 10.0) / dy))
+    outside = np.ones(n, bool)
+    outside[max(bL - margin, 0):min(bR + margin, n - 1) + 1] = False
+    one_sided = outside[:bL].sum() < min_side or outside[bR + 1:].sum() < min_side
+    flags = [f for f in flags if f not in ("reference_one_sided", "little_unworn_reference")]
+    if outside.sum() < 0.15 * n:
+        flags.append("little_unworn_reference")
+    if one_sided:
+        flags.append("reference_one_sided")
+    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        prof = np.nanmean(zl, axis=1)
+    sm0 = ndi.gaussian_filter1d(prof, 3)
+    band = slice(bL, bR + 1)
+    groove = float(np.clip(-prof[band], 0, None).sum() * dy)
+    pile = float(np.clip(prof[band], 0, None).sum() * dy)
+    n_eff = max(outside.sum() * dy / b.get("corr_len_um", 50.0), 1.0)
+    ref_se = float(np.std(prof[outside]) / np.sqrt(n_eff))
+    unc = ref_se * (bR - bL + 1) * dy
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        sa_un = float(np.nanmean(np.abs(zl[outside])))
+        core = zl[L:R + 1]
+        sa_tr = float(np.nanmean(np.abs(core - np.nanmean(core))))
+    out.update({
+        "wear_detected": True, "worn_area_um2": groove, "pileup_area_um2": pile, "net_area_um2": groove - pile,
+        "track_width_um": (R - L + 1) * dy, "band_width_um": (bR - bL + 1) * dy,
+        "track_max_depth_um": float(-sm0[band].min()), "track_max_ridge_um": float(sm0[band].max()),
+        "groove_unc_um2": unc, "area_LOD_um2": 2.0 * unc, "reference_ok": not one_sided,
+        "Sa_unworn_um": sa_un, "Sa_track_um": sa_tr, "wear_flags": ";".join(flags)})
+    return out, {"z": zl, "rough": rough, "prof": prof, "band": (bL, bR), "core": (L, R), "dx": dx, "dy": dy}

@@ -1,28 +1,29 @@
 # ---------------------------------------------------------------------------
-# Target-extraction settings (COF + wear rate).
+# Target-extraction settings (per-cycle COF + groove wear, 304 SS DOE).
 # Every value here can be overridden per run through data/run_sheet.csv
-# where a matching column exists (e.g. Stroke_mm, track_angle_deg).
+# where a matching column exists (e.g. track_angle_deg, sliding_step).
 # ---------------------------------------------------------------------------
 
 paths:
-  raw_dir: data/raw                 # one sub-folder per Experiment_ID
+  raw_dir: testdata                 # one sub-folder per run (R01, R02, ...; T01... top-ups)
   run_sheet: data/run_sheet.csv     # DOE log (inputs + per-run overrides)
   processed_dir: data/processed     # ML-ready tables are written here
   reports_dir: reports/runs         # per-run QC figures + summary.json
+  file_layout: config/file_layout.yaml   # file roles / location / checkpoint / RAW format
 
 # --- Test geometry defaults (used when the run sheet leaves them blank) -----
 test:
-  stroke_mm: 6.25
+  stroke_mm: 5.0                    # amplitude A: +-5 mm, track length 10 mm
   # "full"      -> stroke_mm is the total travel of one pass (distance per cycle = 2*stroke)
   # "amplitude" -> stroke_mm is the half-travel (distance per cycle = 4*stroke)
-  # DOE: V = 4·Δx·f, S = 4·Δx·f·t  ->  stroke_mm is the amplitude Δx.
+  # DOE: N = f*t, S = 4*A*N (= 0.02*f*t m)  ->  stroke_mm is the amplitude A.
   stroke_definition: amplitude
-  ball_diameter_mm: 6.0
-  # Elastic constants for the Hertz contact estimate (steel ball on steel flat)
+  ball_diameter_mm: 6               # hardened bearing-steel ball, new every run (R = 3 mm)
+  # Elastic constants for the Hertz contact estimate (steel ball on 304 stainless flat)
   E_ball_GPa: 210
   nu_ball: 0.30
-  E_flat_GPa: 190                   # maraging steel ~ 180-195 GPa
-  nu_flat: 0.30
+  E_flat_GPa: 193
+  nu_flat: 0.29
 
 # --- Tribometer CSV --------------------------------------------------------
 csv:
@@ -33,14 +34,29 @@ csv:
     recipe_step: 'recipestep'
     fz_N: 'fz'
     fx_N: '(^|\.)fx \(n\)|daq\.fx$'       # optional raw friction force channel
+    # optional reciprocating-drive position (or velocity) channel; the XYZ stage and
+    # Z depth are excluded. Provisional until the 1000 Hz header is seen (Part 0).
+    position_mm: '^(?!.*z depth)(?!xyz\.).*(position|displacement|velocity)'
     z_depth_mm: 'z depth'
     cof: 'cof'
-  # sliding step: "auto" or an explicit RecipeStep number
+    freq_Hz: 'reciprocating\.frequency|^frequency'   # achieved drive frequency (older exports only)
+  # sliding step: "auto" or an explicit RecipeStep number (old single-step extract_cof)
   sliding_step: auto
 
 # --- COF target ------------------------------------------------------------
 cof:
-  bin_s: 1.0                  # COF(t) series resolution for the time-resolved dataset
+  # per-cycle COF (extract_cof_cycles): COF_c = (P90(Fx) - P10(Fx)) / 2 / mean(Fz)
+  trim_step_start_s: 1.0      # acceleration ramp at every step start (cycles counted, COF not)
+  trim_step_end_s: 1.0        # deceleration ramp at every step stop
+  halfrange_pct: [10, 90]
+  steady_last_frac: 0.5       # COF_steady = median COF_c over the last 50 % of the step's cycles
+  # one continuous sliding step (campaign protocol): split it at t_run/2 so checkpoint 1 = 50 %,
+  # checkpoint 2 = 100 % of the run (wear is scanned only at the end -> checkpoint 2)
+  split_single_step: true
+  reversal_median_s: 0.02     # moving median before Fx sign-reversal detection
+  reversal_hysteresis: 0.2    # x the step's half-range
+  # old single-step extraction (extract_cof: 1 Hz COF(t) and steady state; inspect command)
+  bin_s: 1.0                  # COF(t) series resolution
   smooth_window_frac: 0.05    # rolling-mean window for steady-state detection (fraction of test)
   min_smooth_window_s: 0.2
   ref_last_frac: 0.5          # steady-state reference = last 50 % of the sliding period
@@ -49,8 +65,6 @@ cof:
   min_runin_frac: 0.02        # always drop at least this fraction at the start
   max_runin_frac: 0.60        # if run-in looks longer than this -> flagged
   trim_end_s: 0.0             # drop the final seconds (stop/deceleration transient)
-  checkpoints_s: [300, 600, 900, 1200, 1800, 2400]   # COF reported around these times (if reached)
-  checkpoint_window_s: 30
   load_tolerance_frac: 0.05   # QC: measured Fz vs run-sheet Load_N
 
 # --- White-light-interferometer screenshot ---------------------------------
@@ -70,7 +84,25 @@ wli:
 
 # --- Wear-scar measurement -------------------------------------------------
 wear:
-  track_angle_deg: auto       # sliding direction in the image, deg CCW from +x; or a number
+  # band: rough-surface track (smooth flattened band + pile-up ridges; the 304 plates have
+  #       Sa ~ 3 um, deeper than the ~1 um groove) - used for the campaign data
+  # groove: groove deeper than the surface texture (smooth specimens, synthetic tests)
+  method: band
+  band:
+    track_axis: x               # tracks run along plate X = image x in every scan; or auto
+    hp_window_px: 15            # high-pass window for the local roughness (px)
+    edge_frac: 0.15             # outer 15 % of rows on each side = unworn reference roughness
+    core_level: 0.5             # core = rows smoother than halfway between unworn and track
+    min_contrast: 0.30          # (R_unworn - R_track) / R_unworn below this -> no track
+    band_extend: 0.40           # search window for the pile-up ridges: core +/- 40 % of its width
+    corr_len_um: 50             # texture correlation length (reference uncertainty)
+    min_reference_um: 110       # unworn surface needed on EACH side of the track to level the scan
+    ref_margin_um: 10           # gap between the final band and the reference surface
+  # Sliding direction in the scan, deg CCW from +x, or "auto". Tracks run along plate X;
+  # set the measured angle here after the first real scan.
+  track_angle_deg: auto
+  track_length_mm: 10.0       # l: groove volume = mean cross-section area x l
+  width_check_tol: 0.5        # flag width_model_mismatch if |V_width / V_groove - 1| > this
   angle_search_step_deg: 2.0
   profile_smooth_px: 2.0
   form_order: 2               # polynomial form removed outside the groove (1 = plane, 2 = quadratic)
@@ -81,7 +113,6 @@ wear:
   min_coverage_frac: 0.5      # use only cross-track positions averaged over >=50 % of track length
   n_segments: 4               # along-track consistency check
   max_segment_cv: 0.5
-  subtract_pileup: false      # true -> V uses (worn area - pile-up area)
-  # If a t = 0 s (baseline) scan of the same spot exists, measure on (worn - baseline):
+  # If the baseline scan of the same location exists, measure on (worn - baseline):
   # texture and specimen form cancel -> ~1 % accuracy even for shallow scars.
   use_baseline_difference: true

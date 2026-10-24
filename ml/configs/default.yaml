@@ -1,11 +1,12 @@
 # =============================================================================
-# ME 323 triboinformatics - ML framework configuration (40-run DOE).
+# ME 323 - 304 stainless steel, dry reciprocating: ML configuration.
 #
-#   python -m ml.train --config ml/configs/default.yaml [--data synthetic|real] [--quick]
+#   python -m ml.train  [--data synthetic|real] [--quick]       # CV on the training runs
+#   python -m ml.train  --final [--force]                       # + refit, test set scored once
+#   python -m ml.topup  --n 4                                   # next runs: GPR sigma + ANN spread
 #
-# Paths are relative to the project root. `--quick` deep-merges the `quick:` block
-# (bottom of this file) over everything else. The resolved config is saved with
-# every result folder (config_snapshot.yaml).
+# Paths are relative to the project root. `--quick` deep-merges the `quick:` block (bottom)
+# over everything else. The resolved config is saved with every result folder.
 # =============================================================================
 seed: 323
 n_jobs: -1                        # parallel CV tasks (joblib/loky); -1 = all cores
@@ -14,102 +15,93 @@ n_jobs: -1                        # parallel CV tasks (joblib/loky); -1 = all co
 data:
   source: real                    # used when --data is not given
   real:
-    runs: data/processed/runs_targets.csv
-    timeseries: data/processed/cof_timeseries.csv
-    wear_trajectory: data/processed/wear_trajectory.csv
+    checkpoints: data/processed/runs_checkpoints.csv
+    cof_cycles: data/processed/cof_cycles.csv
+    topup_candidates: data/topup_candidates.csv
   synthetic:
-    runs: data/synthetic/runs_targets.csv
-    timeseries: data/synthetic/cof_timeseries.csv
-    wear_trajectory: data/synthetic/wear_trajectory.csv
+    checkpoints: data/synthetic/runs_checkpoints.csv
+    cof_cycles: data/synthetic/cof_cycles.csv
+    topup_candidates: data/synthetic/topup_candidates.csv
+  run_sheet: data/run_sheet.csv   # used positions / existing runs for top-up selection
   drop_status: [error]
-  drop_id_prefixes: [TRIAL]
-  # Rows missing any of these cannot be placed in the design space -> dropped (logged).
-  design_columns: [Carbon_pct, Load_N, Freq_Hz]
-  # Candidate input columns; absent / all-NaN ones are dropped and logged.
-  input_columns: [Carbon_pct, Hardness_HV, Load_N, Freq_Hz, Stroke_mm, Speed_mps,
-                  Hertz_p_mean_MPa, Hertz_width_um]
-  cof_bin_s: 120                  # cof_time regime: mean COF per bin (Time_s = bin end)
-  # Centre-point replicate pairs: pooled SD = noise floor of every endpoint target.
-  replicate_pairs: [[R03, R04], [R13, R14], [R23, R24], [R33, R34]]
+  train_roles: [completed, corner, interior, center_replicate, topup]   # R00-R23 + top-ups
+  test_roles: [test]                                                    # R24-R29, --final only
+  replicates: [R04, R14, R20]     # centre replicates: noise floor
+
+# Inputs (nominal, natural log; standardised inside the folds): ln L, ln f, ln t_ckpt.
+# Track-width variant: ml/configs/width.yaml (targets log10_w + COF_steady).
+targets: [log10_k, COF_steady]
 
 # Wear_detected == False -> wear below the detection limit (censored), not zero.
 censoring:
-  mode: exclude                   # exclude | lod_half
-
-# Regimes -> targets. `--targets` takes regime names or target names.
-regimes:
-  endpoint: [log10_k, log10_V, COF_ss_mean]
-  trajectory_params: [log10_Vdot_steady, log10_dV_run, log10_tau_trans]
-  wear_checkpoints: [log10_V_t]   # extra input log10(Time_s); rows with t > 0
-  cof_time: [COF_t]               # extra input Time_s (bin end)
-
-# --------------------------------------------------------------------- features
-features:
-  sets:
-    base: [Carbon_pct, Load_N, Freq_Hz]
-    physics: [Carbon_pct, Load_N, Freq_Hz, Speed_mps, Hertz_p_mean_MPa, PV]
-  optional_base: [Hardness_HV]    # added to every set when it has any non-null value
-  use: [base, physics]
+  mode: exclude                   # exclude | lod_half  (log10 k only)
 
 # --------------------------------------------------------------------- CV
 cv:
-  gkf5:
-    n_splits: 5                   # 8 runs per fold (asserted; next seed offset on violation)
-    seeds: [0, 1, 2, 3, 4]        # one repeat per seed
-    stratify: Specimen_ID
-    seed_offset_step: 1000
-    max_tries: 500
-  loao: true                      # leave one alloy (specimen) out: 4 folds
+  n_splits: 5                     # GroupKFold by run group, groups shuffled by seed
+  seeds: [0, 1, 2, 3, 4]          # one outer repeat per seed
   inner_folds: 4                  # nested tuning: GroupKFold on the training groups
-  heavy_task_slots: 3             # GPR fits on > 400 rows (cof_time) run at most 3 at a time
 
 # --------------------------------------------------------------------- models
 # params: fixed constructor arguments. grid: lists searched exhaustively in the inner CV.
 models:
-  gpr:
+  ann:                            # 3 -> {3, 4} tanh -> 2 outputs (log10 k, COF), <= 30 weights
+    enabled: true
+    params: {n_members: 20, lr: 0.01, max_epochs: 3000, patience: 200, val_frac: 0.2}
+    grid:
+      hidden: [3, 4]
+      weight_decay: [0.0001, 0.001, 0.01]
+  gpr:                            # Constant * Matern-5/2 (ARD) + White, normalize_y, 5 restarts
     enabled: true
     params: {n_restarts_optimizer: 5, nu: 2.5}
-  tabpfn:
-    enabled: true
   svr:
     enabled: true
     grid:
       C: [0.1, 1, 10, 100]
-      gamma: [scale, 0.01, 0.1, 1]
+      gamma: [scale, 0.1, 1]
       epsilon: [0.01, 0.05, 0.1]
-  rf:
+  tabpfn:
     enabled: true
-    params: {n_estimators: 300}
-    grid:
-      max_depth: [2, 3]
-      min_samples_leaf: [3, 5]
-      max_features: [1.0, sqrt]
-  xgb:
+  xgb:                            # shallow
     enabled: true
-    params: {subsample: 0.8, reg_lambda: 1.0}
+    params: {subsample: 0.8}
     grid:
-      n_estimators: [200, 500]
-      max_depth: [2, 3]
-      learning_rate: [0.02, 0.05]
-      min_child_weight: [3, 5]
-  ridge:                          # reference baseline only, never selected
+      max_depth: [1, 2]
+      n_estimators: [200, 400]
+      learning_rate: [0.03, 0.05]
+      min_child_weight: [2, 4]
+  ridge:                          # reference only, never selected; exponents with bootstrap CIs
     enabled: true
     grid:
       alpha: [0.1, 1, 10]
 
-# --------------------------------------------------------------------- physics route (B5)
-physics_route:
-  enabled: true                   # eq.-1 parameters -> two_stage_wear -> wear_checkpoints rows
-
-# --------------------------------------------------------------------- interpretation
+# --------------------------------------------------------------------- interpretation / report
 interpret:
   enabled: true
-  map_points: 41                  # GPR response surface grid per axis
-  calibration_levels: 19
+  map_points: 41                  # GPR surface grid per axis
+  surface_times_s: [60, 120]      # GPR surfaces over ln L x ln f at these checkpoint times
+  permutation_repeats: 10         # group-permutation importance (first outer repeat)
+  bootstrap: 1000                 # group-bootstrap resamples for the Ridge exponents
+
+# --------------------------------------------------------------------- final test
+final:
+  dir: final                      # ml/results/final/ (synthetic: final_synthetic/); never overwritten without --force
+
+# --------------------------------------------------------------------- top-up selection
+topup:
+  max_runs: 10                    # at most 10 top-up runs in total
+  grid: {L: [10, 100, 15], f: [4, 15, 12], t: [60, 120, 7]}   # [min, max, points], log-spaced
+  min_lft: 7200                   # L*f*t >= 7200
+  max_lft: 90000                  # L*f*t <= 90000
+  min_distance: 0.15              # standardised log space, to existing runs and earlier picks
+  faces: [F1, F2]
+  x_mm: [8, 21, 34]
+  y_mm: [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39]
 
 # --------------------------------------------------------------------- --quick
-# One gkf5 repeat, inner 3 folds, first value of each grid list only.
+# One outer repeat, inner 3 folds, first value of each grid list, ANN ensemble of 3.
 quick:
-  cv: {gkf5: {seeds: [0]}, inner_folds: 3}
+  cv: {seeds: [0], inner_folds: 3}
   grid_first_only: true
+  models: {ann: {params: {n_members: 3}}}
   interpret: {map_points: 21}

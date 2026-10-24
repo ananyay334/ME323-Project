@@ -7,8 +7,9 @@ Interface (sklearn estimator protocol; every model is ``clone``-able):
     est.predict(X) -> np.ndarray
     est.predict_std(X) -> np.ndarray         # only if spec.has_std
 
-Every model runs on every regime and both feature sets. ``selectable=False`` marks a
-reference baseline that is reported but never chosen as "best".
+Single-output models are fitted per target; a ``multi_output`` model (the ANN) is fitted
+once on both targets (``y`` of shape (n, 2), NaN = masked) and predicts both.
+``selectable=False`` marks a reference baseline that is reported but never chosen as "best".
 
 Adding a model: write ``ml/models/<name>.py`` with ``SPECS = [ModelSpec(...)]`` (import
 optional dependencies inside the build function), append the module to
@@ -26,6 +27,7 @@ from ..config import has_module
 log = logging.getLogger("ml.models")
 
 MODEL_MODULES = [
+    "ml.models.ann",
     "ml.models.gpr",
     "ml.models.tabpfn_model",
     "ml.models.svr",
@@ -43,6 +45,7 @@ class ModelSpec:
     requires: tuple[str, ...] = ()                # optional modules that must all be installed
     has_std: bool = False
     selectable: bool = True                       # False: reference baseline, never "best"
+    multi_output: bool = False                    # True: one fit predicts every target
 
     def missing(self) -> list[str]:
         """Missing optional dependencies (empty list = available)."""

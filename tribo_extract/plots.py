@@ -97,3 +97,73 @@ def plot_wear(hm, internals: dict, res: dict, title: str, out: Path):
     fig.tight_layout()
     fig.savefig(out, dpi=130)
     plt.close(fig)
+
+
+def plot_cof_cycles(cycles, checkpoints: list, title: str, out: Path):
+    """Per-cycle COF vs sliding time; shaded = steady window of each checkpoint."""
+    fig, ax = plt.subplots(2, 1, figsize=(8, 4.8), sharex=True, gridspec_kw={"height_ratios": [2, 1]})
+    for cp in checkpoints:
+        if np.isfinite(cp.get("steady_from_s", np.nan)):
+            ax[0].axvspan(cp["steady_from_s"], cp["steady_to_s"], color=BLUE, alpha=0.08, lw=0)
+            ax[0].hlines(cp["COF_steady"], cp["steady_from_s"], cp["steady_to_s"], color=ORANGE, lw=1.6,
+                         label=f"cp{cp['Checkpoint']}: COF_steady = {cp['COF_steady']:.4f}")
+    for s, sub in cycles.groupby("Step"):
+        ax[0].plot(sub["t_s"], sub["COF_c"], color=BLUE, lw=0.9, marker=".", ms=2)
+        ax[1].plot(sub["t_s"], sub["Fz_N"], color=INK2, lw=0.8)
+    ax[0].set_ylabel("COF per cycle\n(P90-P10)/2 of Fx / Fz")
+    ax[0].set_title(f"{title} — per-cycle COF (shaded = steady window)", loc="left")
+    ax[0].legend(loc="lower right", fontsize=8)
+    ax[1].set_ylabel("Fz (N)")
+    ax[1].set_xlabel("sliding time (s)")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+
+
+def plot_band(internals: dict, res: dict, title: str, out: Path):
+    """Rough-surface track: height map with the core / band edges, roughness and mean profile."""
+    z = internals["z"]
+    dx, dy = internals["dx"], internals["dy"]
+    ny, nx = z.shape
+    fig = plt.figure(figsize=(12, 3.8))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.5, 0.8, 1.2])
+    ax0 = fig.add_subplot(gs[0])
+    lo, hi = np.nanpercentile(z, [2, 98])
+    im = ax0.imshow(z, cmap=HEIGHT_CMAP, vmin=lo, vmax=hi, aspect="auto", extent=[0, nx * dx, ny * dy, 0])
+    ax0.grid(False)
+    if "band" in internals:
+        for k in internals["band"]:
+            ax0.axhline(k * dy, color=ORANGE, lw=1, ls="--")
+        for k in internals["core"]:
+            ax0.axhline(k * dy, color="#1baf7a", lw=1)
+    ax0.set_xlabel("along track (µm)")
+    ax0.set_ylabel("across track (µm)")
+    ax0.set_title("levelled height (green: smooth core, orange: band)", loc="left")
+    fig.colorbar(im, ax=ax0, fraction=0.04, label="µm")
+    y = np.arange(len(internals["rough"])) * dy
+    ax1 = fig.add_subplot(gs[1])
+    ax1.plot(internals["rough"], y, color=INK2, lw=1)
+    ax1.invert_yaxis()
+    ax1.set_xlabel("local roughness (µm)")
+    ax1.set_title(f"contrast {res.get('contrast', np.nan):.2f}", loc="left")
+    ax2 = fig.add_subplot(gs[2])
+    if "prof" in internals:
+        p = internals["prof"]
+        bL, bR = internals["band"]
+        ax2.plot(y, p, color=INK2, lw=1)
+        ax2.fill_between(y[bL:bR + 1], np.minimum(p[bL:bR + 1], 0), 0, color=ORANGE, alpha=0.4, lw=0,
+                         label=f"groove {res['worn_area_um2']:.0f} µm²")
+        ax2.fill_between(y[bL:bR + 1], np.maximum(p[bL:bR + 1], 0), 0, color="#1baf7a", alpha=0.35, lw=0,
+                         label=f"pile-up {res['pileup_area_um2']:.0f} µm²")
+        ax2.axhline(0, color=MUTED, lw=0.8)
+        ax2.legend(loc="lower left", fontsize=7)
+        ax2.set_title(f"core width {res['track_width_um']:.0f} µm, ref. ±{res['groove_unc_um2']:.0f} µm²",
+                      loc="left")
+    else:
+        ax2.set_title("no track found", loc="left")
+    ax2.set_xlabel("across track (µm)")
+    ax2.set_ylabel("mean height vs unworn plane (µm)")
+    fig.suptitle(title, x=0.01, ha="left", color=INK, fontsize=10)
+    fig.tight_layout()
+    fig.savefig(out, dpi=110)
+    plt.close(fig)

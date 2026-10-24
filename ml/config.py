@@ -191,4 +191,4 @@ def data_paths(cfg: dict, source: str) -> dict[str, Path]:
     if source not in ("real", "synthetic") or source not in cfg["data"]:
         raise ValueError(f"unknown data source {source!r}; expected one of 'real', 'synthetic'")
     d = cfg["data"][source]
-    return {k: resolve_path(d[k]) for k in ("runs", "timeseries", "wear_trajectory")}
+    return {k: resolve_path(d[k]) for k in ("checkpoints", "cof_cycles", "topup_candidates")}

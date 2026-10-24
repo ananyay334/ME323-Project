@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import TARGETS
+from .data import INPUTS, TARGETS
 from .models.registry import registry
 
 
@@ -50,35 +50,41 @@ def img(path, out_dir: Path, alt: str = "") -> str:
 
 
 def target_table(summary: pd.DataFrame, target: str, best: pd.DataFrame) -> pd.DataFrame:
-    """One row per (model, feature set): gkf5 and LOAO mean ± std, GPR coverage."""
-    s = summary[summary["target"] == target]
-    if s.empty:
-        return s
-    g = s[s["split"] == "gkf5"].set_index(["model", "feature_set"])
-    lo = s[s["split"] == "loao"].set_index(["model", "feature_set"])
+    """One row per model: CV mean ± SD over outer folds/repeats, interval coverage."""
+    s = summary[summary["target"] == target].sort_values("RMSE_mean")
     b = best[best["target"] == target]
-    bkey = (b["model"].iloc[0], b["feature_set"].iloc[0]) if len(b) else None
+    bm = b["model"].iloc[0] if len(b) else None
     reg = registry()
     rows = []
-    for key in g.sort_values("RMSE_mean").index:
-        r = g.loc[key]
-        m = key[0]
-        name = f"**{m}**" if key == bkey else m
-        if m in reg and not reg[m].selectable:
+    for r in s.itertuples():
+        name = f"**{r.model}**" if r.model == bm else r.model
+        if r.model in reg and not reg[r.model].selectable:
             name += " (reference)"
-        if m == "physics_route":
-            name += " (eq.-1 reconstruction)"
-        row = {"model": name, "features": key[1],
-               "gkf5 R²": pm(r["R2_mean"], r["R2_std"]), "gkf5 RMSE": pm(r["RMSE_mean"], r["RMSE_std"]),
-               "gkf5 MAE": pm(r["MAE_mean"], r["MAE_std"])}
-        if key in lo.index:
-            q = lo.loc[key]
-            row.update({"LOAO R²": pm(q["R2_mean"], q["R2_std"]),
-                        "LOAO RMSE": pm(q["RMSE_mean"], q["RMSE_std"]),
-                        "LOAO MAE": pm(q["MAE_mean"], q["MAE_std"])})
-        else:
-            row.update({"LOAO R²": "–", "LOAO RMSE": "–", "LOAO MAE": "–"})
-        row["95 % cov."] = fmt(r.get("coverage95_mean", np.nan), 2)
+        rows.append({"model": name, "pooled R²": fmt(getattr(r, "R2_pooled", np.nan)),
+                     "R²": pm(r.R2_mean, r.R2_std), "RMSE": pm(r.RMSE_mean, r.RMSE_std),
+                     "MAE": pm(r.MAE_mean, r.MAE_std),
+                     "95 % cov.": fmt(getattr(r, "coverage95_mean", np.nan), 2), "folds": r.n_folds})
+    return pd.DataFrame(rows)
+
+
+def factor_table(interp: dict, target: str, best_model: str | None) -> pd.DataFrame:
+    """GPR length scale, permutation importance (best model) and Ridge exponent per input."""
+    ls = interp.get("lengthscales", pd.DataFrame())
+    imp = interp.get("importance", pd.DataFrame())
+    ex = interp.get("exponents", pd.DataFrame())
+    rows = []
+    for f in INPUTS:
+        row = {"input": f}
+        if ls is not None and len(ls) and (ls["target"] == target).any() and f in ls:
+            row["GPR length scale"] = fmt(float(ls.loc[ls["target"] == target, f].iloc[0]))
+        if imp is not None and len(imp) and best_model:
+            q = imp[(imp["target"] == target) & (imp["model"] == best_model) & (imp["feature"] == f)]
+            row[f"perm. importance ΔRMSE ({best_model})"] = pm(q["mean"].iloc[0], q["std"].iloc[0]) if len(q) else "–"
+        if ex is not None and len(ex):
+            q = ex[(ex["target"] == target) & (ex["feature"] == f)]
+            if len(q):
+                q = q.iloc[0]
+                row["Ridge exponent [95 % CI]"] = f"{fmt(q['exponent'])} [{fmt(q['ci_low'])}, {fmt(q['ci_high'])}]"
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -90,32 +96,31 @@ def write_report(out_dir: Path, ctx: dict) -> Path:
     env = json.loads((out_dir / "environment.json").read_text()) \
         if (out_dir / "environment.json").exists() else {}
     plan = ctx["plan"]
-    figs = (ctx.get("interp") or {}).get("figures", {})
-    L = ["# ME 323 triboinformatics: model report (40-run DOE)\n",
+    interp = ctx.get("interp") or {}
+    figs = interp.get("figures", {})
+    f = data.frame
+    L = ["# ME 323 — 304 stainless steel, dry reciprocating: model report\n",
          f"- results folder: `{out_dir.name}` · data: **{data.source}**"
-         + (" · **--quick** (smoke test)" if cfg.get("quick_mode") else ""),
+         + (" · **--quick** (smoke test)" if cfg.get("quick_mode") else "")
+         + (" · **--final**" if ctx.get("final") else ""),
          f"- command: `{' '.join(env.get('argv', []))}` · git `{env.get('git_commit')}` · seed "
          f"{cfg['seed']} · run time {ctx.get('seconds', 0) / 60:.1f} min",
-         f"- validation: gkf5 = StratifiedGroupKFold(5) by specimen × {len(plan.seeds)} repeat(s) "
-         f"(seeds {plan.seeds}, seed offsets used {plan.offsets}); LOAO = "
-         f"{len(plan.loao_labels)} folds ({', '.join(plan.loao_labels)}); nested inner "
-         f"GroupKFold({cfg['cv']['inner_folds']})"
-         + ("; first grid value only" if cfg.get("grid_first_only") else "; full grids") + "\n"]
+         f"- validation: {plan.n_splits}-fold GroupKFold by run group (R04/R14/R20 = one group; both "
+         f"checkpoints of a run together), groups shuffled by seed, {len(plan.seeds)} repeat(s) "
+         f"(seeds {plan.seeds}); nested inner GroupKFold({plan.n_inner})"
+         + ("; first grid value only" if cfg.get("grid_first_only") else "; full grids")
+         + ". Test runs R24–R29 are not loaded" + (" until the final refit." if ctx.get("final") else ".") + "\n"]
 
     L.append("## 1. Data\n")
-    L.append(f"- {len(data.runs)} usable runs in {data.runs['group'].nunique()} groups on "
-             f"{data.runs['Specimen_ID'].nunique()} specimens; censoring mode "
-             f"`{cfg['censoring']['mode']}`.")
-    if data.dropped_inputs:
-        L.append("- dropped input columns: " + ", ".join(f"`{c}` ({w})" for c, w in
-                                                         data.dropped_inputs.items()))
+    L.append(f"- training rows: {len(f)} ({f['Experiment_ID'].nunique()} runs, {f['group'].nunique()} groups; "
+             f"roles: " + ", ".join(f"{k} {v}" for k, v in f.drop_duplicates('Experiment_ID')['Role']
+                                    .value_counts().items()) + ")")
+    L.append("- inputs: ln(Load_N), ln(Freq_Hz), ln(Time_s) (nominal; standardised inside the folds)")
     rows = []
-    for t, info in ctx["target_info"].items():
-        rows.append({"regime": info["regime"], "target": t, "rows": info.get("n_rows", 0),
-                     "runs": info.get("n_runs", 0),
-                     "censored (< LOD)": info.get("n_censored", "–"),
-                     "censored excluded": info.get("n_censored_excluded", "–"),
-                     "without value": info.get("n_missing", 0)})
+    for t in data.targets:
+        rows.append({"target": t, "label": TARGETS[t], "rows": int(f[t].notna().sum()),
+                     "censored (< LOD)": int(f[f"censored_{t}"].sum()),
+                     "censoring": cfg["censoring"]["mode"] if t == "log10_k" else "–"})
     L.append("\n" + md_table(pd.DataFrame(rows)))
     L.append("<details><summary>data-loading log</summary>\n")
     L += [f"- {n}" for n in data.notes]
@@ -129,73 +134,62 @@ def write_report(out_dir: Path, ctx: dict) -> Path:
         L.append("**Failures:**\n\n" + md_table(pd.DataFrame(ctx["failures"]).head(20)))
 
     L.append("## 3. Cross-validated results\n")
-    L.append("Mean ± std over outer folds (gkf5: folds × repeats; LOAO: one fold per held-out "
-             "grade). Bold = selected (lowest gkf5 RMSE, Ridge excluded). `95 % cov.` = GPR / "
-             "TabPFN interval coverage on gkf5.\n")
+    L.append("Mean ± SD over outer folds × repeats. Bold = selected (lowest CV RMSE, Ridge excluded). "
+             "`pooled R²` = R² of all out-of-fold predictions of a repeat together (mean over repeats); "
+             "the fold-wise R² is unstable with 3–4 run groups per fold, so read the pooled one. "
+             "`95 % cov.` = coverage of the central 95 % interval (GPR, ANN ensemble, TabPFN).\n")
     noise = ctx.get("noise", {})
-    for regime, targets in cfg["regimes"].items():
-        ts = [t for t in targets if t in set(summary["target"])]
-        if not ts:
-            continue
-        L.append(f"### {regime}\n")
-        for t in ts:
-            L.append(f"**{t}** — {TARGETS[t].label}")
-            if t in noise:
-                L.append(f"\nNoise floor (pooled SD of the {noise[t]['n_pairs']} centre replicate "
-                         f"pairs): **{fmt(noise[t]['noise_sd'])}** — compare with the RMSE columns.")
-            L.append("\n" + md_table(target_table(summary, t, best)))
-    if figs.get("parity"):
-        L.append(img(figs["parity"], out_dir, "parity"))
+    for t in data.targets:
+        L.append(f"### {t} — {TARGETS[t]}\n")
+        if t in noise:
+            nf = noise[t]
+            L.append(f"Noise floor (pooled SD of R04/R14/R20 over {nf['n_checkpoints']} checkpoint(s)): "
+                     f"**{fmt(nf['noise_sd'])}** — compare with the RMSE column.\n")
+        L.append(md_table(target_table(summary, t, best)))
+    L.append(img(figs.get("parity"), out_dir, "parity (CV)"))
 
-    L.append("## 4. Leave-one-alloy-out, per held-out grade\n")
-    lg = (ctx.get("interp") or {}).get("loao_grades", pd.DataFrame())
-    if lg is not None and len(lg):
-        piv = lg.pivot_table(index=["target", "model", "feature_set"], columns="grade",
-                             values="RMSE").reset_index()
-        piv.columns = [str(c) for c in piv.columns]
-        L.append("RMSE on the held-out grade (best feature set per model):\n\n" + md_table(piv))
-    L.append(img(figs.get("loao_per_grade"), out_dir, "LOAO per grade"))
+    L.append("## 4. Selected models\n")
+    L.append(md_table(best.rename(columns={"R2_mean": "CV R²", "RMSE_mean": "CV RMSE"})))
 
-    L.append("## 5. Wear trajectory: physics route vs direct models\n")
-    s = summary[(summary["target"] == "log10_V_t") & (summary["split"] == "gkf5")]
-    if len(s) and (s["model"] == "physics_route").any():
-        pr = s[s["model"] == "physics_route"].sort_values("RMSE_mean").iloc[0]
-        sel = best[best["target"] == "log10_V_t"]
-        dr = s[(s["model"] == sel["model"].iloc[0]) & (s["feature_set"] == sel["feature_set"].iloc[0])] \
-            .iloc[0] if len(sel) else s[s["model"] != "physics_route"].sort_values("RMSE_mean").iloc[0]
-        L.append(f"- physics route (eq.-1 parameters → `two_stage_wear`): RMSE "
-                 f"{pm(pr['RMSE_mean'], pr['RMSE_std'])}, R² {fmt(pr['R2_mean'])} ({pr['feature_set']})")
-        L.append(f"- selected direct `wear_checkpoints` model: {dr['model']} ({dr['feature_set']}), RMSE "
-                 f"{pm(dr['RMSE_mean'], dr['RMSE_std'])}, R² {fmt(dr['R2_mean'])}")
-        ch = ctx.get("route_choices")
-        if ch is not None and len(ch):
-            L.append("- models chosen by inner CV for the eq.-1 parameters (count over folds): "
-                     + "; ".join(f"{p}: " + ", ".join(f"{m} ×{n}" for m, n in v.items())
-                                 for p, v in ch.items()))
+    L.append("## 5. Which factor controls COF and wear\n")
+    L.append("GPR ARD length scale (standardised inputs; small = strong or curved effect), group-permutation "
+             "importance (increase in held-out RMSE when an input is permuted between run groups; first "
+             "repeat, best model) and the Ridge exponent d(target)/d(ln x) with a group-bootstrap 95 % "
+             f"interval ({cfg['interpret'].get('bootstrap', 1000)} resamples).\n")
+    for t in data.targets:
+        b = best[best["target"] == t]
+        L.append(f"**{t}**\n\n" + md_table(factor_table(interp, t, b["model"].iloc[0] if len(b) else None)))
+    for t in data.targets:
+        L.append(img(figs.get(f"gpr_surface_{t}"), out_dir, f"GPR surface {t}"))
+    L.append(img(figs.get("cof_replicates"), out_dir, "replicate COF"))
+
+    tp = ctx.get("topup")
+    L.append("## 6. Top-up runs: pre-registered prediction vs measurement\n")
+    if tp is not None and len(tp):
+        L.append("Predictions written by `python -m ml.topup` before the runs were made "
+                 "(`topup_candidates.csv`):\n\n" + md_table(tp))
     else:
-        L.append("_Physics route not run (no checkpoint scans or too few eq.-1 fits)._")
-    L.append("\n" + img(figs.get("trajectory"), out_dir, "trajectory reconstructions"))
+        L.append("_No measured top-up runs yet._\n")
 
-    L.append("## 6. Selected models\n")
-    L.append(md_table(best.rename(columns={"R2_mean": "gkf5 R²", "RMSE_mean": "gkf5 RMSE"})))
+    fin = ctx.get("final")
+    if fin:
+        L.append("## 7. Test set (R24–R29, scored once)\n")
+        L.append(f"Selected model per target refitted on all {len(f)} training rows; {fin['n_runs']} test runs.\n")
+        L.append(md_table(fin["metrics"][[c for c in ["target", "model", "R2", "RMSE", "MAE", "coverage95", "n"]
+                                          if c in fin["metrics"]]]))
+        L.append(img(fin.get("figure"), out_dir, "parity (test)"))
 
-    L.append("## 7. GPR\n")
-    for k in sorted(figs):
-        if k.startswith("gpr_surface_"):
-            L.append(img(figs[k], out_dir, k))
-    L.append(img(figs.get("gpr_lengthscales"), out_dir, "GPR length scales"))
-    L.append(img(figs.get("gpr_calibration"), out_dir, "GPR calibration"))
-    for n in (ctx.get("interp") or {}).get("notes", []):
-        L.append(f"- note: {n}")
-
-    L.append("\n## 8. Assumptions\n\nSee `ml/README.md` → *Assumptions* (copied into every run).\n")
+    L.append("\n## Assumptions\n\nFrom the project `README.md` → *Assumptions*.\n")
     L += [f"- {a}" for a in ctx.get("assumptions", [])]
     if data.source == "synthetic":
         L.append("- **Synthetic data**: effects are planted (`data/synthetic/planted_effects.json`); "
                  "the numbers validate the pipeline, not the material.")
+    for n in interp.get("notes", []):
+        L.append(f"- note: {n}")
     L.append("\nFiles: `metrics.csv`, `metrics_folds.csv`, `predictions.csv`, `hyperparameters.csv`, "
-             "`best_models.csv`, `physics_route_params.csv`, `interpretation/`, `figures/`, "
-             "`config_snapshot.yaml`, `environment.json`, `run.log`.\n")
+             "`best_models.csv`, `importance_folds.csv`, `interpretation/`, `figures/`, "
+             "`config_snapshot.yaml`, `environment.json`, `run.log`"
+             + (", `test_metrics.csv`, `test_predictions.csv`" if fin else "") + ".\n")
     path = out_dir / "report.md"
     path.write_text("\n".join(L), encoding="utf-8")
     return path

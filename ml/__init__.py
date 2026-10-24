@@ -1,24 +1,23 @@
-"""ml - modelling framework for the ME 323 triboinformatics project (40-run DOE).
+"""ml - modelling framework for the ME 323 project (304 stainless steel, dry reciprocating).
 
-Reads only the ML-ready tables written by ``tribo_extract`` (``data/processed/``) or their
-synthetic stand-ins (``data/synthetic/``).
+Reads only ``runs_checkpoints.csv`` (+ ``cof_cycles.csv`` for one figure) written by
+``tribo_extract`` (``data/processed/``) or the synthetic stand-in (``data/synthetic/``).
 
 Modules
 -------
 config      configuration loading, seeding, logging, run snapshots
-data        load + clean the input tables; the four regimes; censoring
-features    feature sets, derived features, leakage guards
-splits      groups, gkf5 (repeated stratified group K-fold) and leave-one-alloy-out
+data        load the run x checkpoint rows (train / sealed test), inputs, targets, censoring
+splits      run groups, 5-fold GroupKFold (groups shuffled by seed), inner GroupKFold
 metrics     regression / interval metrics, replicate noise floor
 tuning      fixed grids, inner-CV tuning
-models      model registry (GPR, TabPFN, SVR, RF, XGBoost, Ridge)
-evaluate    nested CV over gkf5 + LOAO, model selection
-trajectory  physics route: eq.-1 parameters -> V_w(t) on the checkpoint rows
-interpret   report figures
-synthetic   synthetic tables in the exact pipeline schema
+models      model registry (ANN ensemble, GPR, SVR, TabPFN, XGBoost, Ridge)
+evaluate    nested CV, group-permutation importance, model selection, full refits
+interpret   figures, GPR length scales, Ridge exponents
+synthetic   synthetic runs_checkpoints.csv in the exact pipeline schema
 report      auto-generated report.md
-train       CLI entry point
-archive/    excluded by the DOE (MLP, KAN, multi-task, PySR, active learning); not imported
+train       CLI entry point (``--final`` scores the test runs once)
+topup       top-up run selection (GPR sigma + ANN ensemble spread)
+archive/    excluded by the DOE (not imported, not tested, not registered)
 """
 import os as _os
 

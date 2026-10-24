@@ -12,7 +12,7 @@ pytest>=7.0
 scikit-learn>=1.3
 joblib>=1.4
 xgboost>=2.0          # XGBoost model (skipped with a warning if missing)
-torch>=2.1            # required by TabPFN
+# torch>=2.1          # optional: ANN backend "torch" (default backend is numpy); needed by TabPFN
 # Optional (primary benchmark; skipped loudly and marked "not run" if missing;
 # downloads the model weights on first use):
 # tabpfn>=2.0

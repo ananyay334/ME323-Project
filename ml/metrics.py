@@ -69,8 +69,14 @@ def summarize(fold_metrics: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return out[keys + [f"{m}_{s}" for m in metrics for s in ("mean", "std")] + ["n_folds"]]
 
 
-def replicate_noise_floor(frame: pd.DataFrame, pairs: list[list[str]]) -> dict[str, float]:
-    """Pooled SD of replicate pairs: sqrt(mean over pairs of (a - b)² / 2)."""
-    y = frame.set_index("Experiment_ID")["y"]
-    d2 = [(y[a] - y[b]) ** 2 / 2 for a, b in pairs if a in y.index and b in y.index]
-    return {"noise_sd": float(np.sqrt(np.mean(d2))) if d2 else np.nan, "n_pairs": len(d2)}
+def replicate_noise_floor(frame: pd.DataFrame, target: str, replicates: list[str]) -> dict:
+    """Pooled SD of the replicate runs: sqrt(mean over checkpoints of the replicates' variance)."""
+    f = frame[frame["Experiment_ID"].isin(replicates)]
+    var, n = [], []
+    for _, sub in f.groupby("Checkpoint"):
+        v = sub[target].dropna().to_numpy(float)
+        if len(v) >= 2:
+            var.append(np.var(v, ddof=1))
+            n.append(len(v))
+    return {"noise_sd": float(np.sqrt(np.mean(var))) if var else np.nan, "n_checkpoints": len(var),
+            "n_values": int(sum(n))}

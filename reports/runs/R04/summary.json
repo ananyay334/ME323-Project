@@ -1,0 +1,179 @@
+{
+  "Experiment_ID": "R04",
+  "issues": [],
+  "files": {
+    "recipe": [
+      "R04.lrx"
+    ],
+    "cof_csv": [
+      "R04.csv"
+    ],
+    "height": [
+      "R04.bcrf",
+      "R04a.bcrf",
+      "R04b.bcrf",
+      "R04c.bcrf"
+    ],
+    "metadata": [
+      "R04.info",
+      "R04a.info",
+      "R04b.info",
+      "R04c.info"
+    ]
+  },
+  "scans": [
+    {
+      "key": "R04",
+      "height": "/home/claude/work/323_project/testdata/R04/R04.bcrf",
+      "preview": NaN,
+      "metadata": "/home/claude/work/323_project/testdata/R04/R04.info",
+      "location": "m",
+      "checkpoint": "cp2",
+      "checkpoint_source": "mtime"
+    },
+    {
+      "key": "R04a",
+      "height": "/home/claude/work/323_project/testdata/R04/R04a.bcrf",
+      "preview": NaN,
+      "metadata": "/home/claude/work/323_project/testdata/R04/R04a.info",
+      "location": "a",
+      "checkpoint": "cp2",
+      "checkpoint_source": "mtime"
+    },
+    {
+      "key": "R04b",
+      "height": "/home/claude/work/323_project/testdata/R04/R04b.bcrf",
+      "preview": NaN,
+      "metadata": "/home/claude/work/323_project/testdata/R04/R04b.info",
+      "location": "b",
+      "checkpoint": "cp2",
+      "checkpoint_source": "mtime"
+    },
+    {
+      "key": "R04c",
+      "height": "/home/claude/work/323_project/testdata/R04/R04c.bcrf",
+      "preview": NaN,
+      "metadata": "/home/claude/work/323_project/testdata/R04/R04c.info",
+      "location": "c",
+      "checkpoint": "cp2",
+      "checkpoint_source": "mtime"
+    }
+  ],
+  "cof_steps": [
+    {
+      "Checkpoint": 1,
+      "Cycles_step": 311,
+      "Step_duration_s": 42.14999999999999,
+      "COF_steady": 0.144970679539521,
+      "COF_std": 0.0028496826232783865,
+      "Freq_achieved_Hz": 7.378410438908661,
+      "Fz_mean_N": 31.98692997326853,
+      "n_cycles_cof": 307,
+      "steady_from_s": 21.6,
+      "steady_to_s": 42.14999999999999,
+      "Zdepth_drift_um": 44.75400000000013,
+      "Cycles_cum": 311,
+      "Stroke_amp_mm": 5.0,
+      "Distance_m": 6.22
+    },
+    {
+      "Checkpoint": 2,
+      "Cycles_step": 315,
+      "Step_duration_s": 42.140000000000015,
+      "COF_steady": 0.1545844908467417,
+      "COF_std": 0.002779235354491626,
+      "Freq_achieved_Hz": 7.475083056478403,
+      "Fz_mean_N": 32.005479331713246,
+      "n_cycles_cof": 307,
+      "steady_from_s": 62.669999999999995,
+      "steady_to_s": 83.29,
+      "Zdepth_drift_um": 3.913850000000025,
+      "Cycles_cum": 626,
+      "Stroke_amp_mm": 5.0,
+      "Distance_m": 12.52
+    }
+  ],
+  "checkpoints": [
+    {
+      "Experiment_ID": "R04",
+      "Role": "center_replicate",
+      "Replicate_of": NaN,
+      "Session": 1,
+      "Face": "F1",
+      "X_mm": 21.0,
+      "Y_mm": 24.0,
+      "Load_N": 32.0,
+      "Freq_Hz": 7.5,
+      "Run_time_s": 84.0,
+      "Hardness_HV": NaN,
+      "Ra_um": NaN,
+      "Ambient_T_C": NaN,
+      "RH_pct": NaN,
+      "Params_source": "recipe_lrx",
+      "DOE_row": "R04",
+      "Checkpoint": 1,
+      "Time_s": 42.0,
+      "Test_date": "2026-10-13T03:36:41",
+      "Cycles_cum": 311,
+      "Distance_m": 6.22,
+      "Freq_achieved_Hz": 7.378410438908661,
+      "Stroke_amp_mm": 5.0,
+      "Fz_mean_N": 31.98692997326853,
+      "COF_steady": 0.144970679539521,
+      "COF_std": 0.0028496826232783865,
+      "n_locations": 0,
+      "Wear_detected": NaN,
+      "k_mm3_per_Nm": NaN,
+      "k_net_mm3_per_Nm": NaN,
+      "V_ball_mm3": NaN,
+      "status": "partial",
+      "issues": "",
+      "flags": "single_step_split_at_half;stroke_nominal;not_scanned"
+    },
+    {
+      "Experiment_ID": "R04",
+      "Role": "center_replicate",
+      "Replicate_of": NaN,
+      "Session": 1,
+      "Face": "F1",
+      "X_mm": 21.0,
+      "Y_mm": 24.0,
+      "Load_N": 32.0,
+      "Freq_Hz": 7.5,
+      "Run_time_s": 84.0,
+      "Hardness_HV": NaN,
+      "Ra_um": NaN,
+      "Ambient_T_C": NaN,
+      "RH_pct": NaN,
+      "Params_source": "recipe_lrx",
+      "DOE_row": "R04",
+      "Checkpoint": 2,
+      "Time_s": 84.0,
+      "Test_date": "2026-10-13T03:36:41",
+      "Cycles_cum": 626,
+      "Distance_m": 12.52,
+      "Freq_achieved_Hz": 7.475083056478403,
+      "Stroke_amp_mm": 5.0,
+      "Fz_mean_N": 32.005479331713246,
+      "COF_steady": 0.1545844908467417,
+      "COF_std": 0.002779235354491626,
+      "n_locations": 4,
+      "n_locations_valid": 3,
+      "Track_width_um": 414.36616,
+      "Track_width_sd_um": 24.20562951601686,
+      "V_width_mm3": 0.019762884901671957,
+      "Wear_detected": false,
+      "Wear_Volume_LOD_mm3": 0.001453467544151124,
+      "Groove_volume_mm3": NaN,
+      "Groove_volume_se_mm3": 0.0001841373428129592,
+      "Pileup_volume_mm3": 0.004879347109699963,
+      "Net_volume_mm3": -0.0036083200021187643,
+      "k_mm3_per_Nm": NaN,
+      "k_net_mm3_per_Nm": -9.006389781646277e-06,
+      "V_ball_mm3": NaN,
+      "status": "partial",
+      "issues": "",
+      "flags": "single_step_split_at_half;stroke_nominal;reference_ok_3_of_4_locations;below_LOD"
+    }
+  ]
+}

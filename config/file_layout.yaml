@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Per-run file layout (Part 0 file discovery). See docs/FILE_FORMATS.md.
+#
+# STATUS: confirmed on the real campaign files (testdata/R01-R29, Oct 2026):
+#   <RunID>.csv            RTEC tribometer log (100 Hz, Fz, Fx, COF, Z, [frequency])
+#   <RunID>.lrx            recipe: load, duration, frequency per step
+#   <RunID><loc>[_NN].bcrf processed WLI height map (BCR-F, float32, z in um), loc = "", a, b, c
+#                          written as R04a.bcrf, R11_a.bcrf or R01a_13.bcrf
+#   <RunID><loc>[_NN].info WLI acquisition (lens, pixel size, stage XY)
+#   *.rtec / *.enc / *.Raw duplicates / encoder log / 1+ GB raw interferogram stacks: never read
+# Only one scan per location exists (taken after sliding) -> checkpoint cp2.
+# ---------------------------------------------------------------------------
+status: confirmed
+
+# Run ID (and optional scan location) at the start of a file name. T01... = top-up runs.
+run_id_regex: '^([RT]\d{2})'
+# COF CSV named after the operating point, e.g. 10_10.csv = <load>_<freq>.csv
+load_freq_csv_regex: '^(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)\.csv$'
+
+# (a) File roles: first matching regex wins (tested on the file name, case-insensitive).
+roles:
+  # .Raw = raw interferogram stack (~1.2 GB), .rtec = RTEC copy of the map, .enc = encoder log
+  ignore: '^\.|^~\$|^thumbs\.db$|^_unassigned\.csv$|^wli_scans\.csv$|\.(raw|rtec|enc)$'
+  sem: '(^|[_\-. ])(sem|eds)([_\-. ]|$)'
+  recipe: '\.lrx$'
+  cof_csv: '^(?!.*_height\.csv$).*\.csv$'
+  height: '\.(bcrf|bcr|sur|opd|datx|plu|asc)$|_height\.(csv|txt|asc)$'
+  preview: '\.(png|jpe?g|bmp|tiff?)$'
+  metadata: '\.(info|txt|xml|ini|json|inf|hdr|log)$'
+
+# (b) Scan location along the track: no suffix -> m (middle), otherwise a / b / c.
+location:
+  # R04a.bcrf, R11_a.bcrf, R01a_13.bcrf -> a ; R04.bcrf, R01_13.bcrf -> m
+  regex: '^[RT]\d{2}_?([a-c])(?=$|[_. ])'
+  default: m
+
+# (c) Checkpoint of a height scan: base (before sliding), cp1 (50 %), cp2 (100 %).
+# The first rule that assigns every scan of one location uniquely is used:
+#   filename  -> tokens below in the name after "<RunID>[_<loc>]"
+#   subfolder -> the same tokens in a sub-folder name inside the run folder
+#   metadata  -> acquisition timestamp in the companion metadata file (order)
+#   mtime     -> file modification time (3 scans: base, cp1, cp2; 2: cp1, cp2; 1: cp2)
+checkpoint:
+  ladder: [filename, subfolder, metadata, mtime]
+  tokens:
+    base: '(^|[_\-. ])(base|baseline|pre|0)(?=$|[_\-. ])'
+    cp1: '(^|[_\-. ])(cp1|50)(?=$|[_\-. ])'
+    cp2: '(^|[_\-. ])(cp2|100)(?=$|[_\-. ])'
+    seconds: '(^|[_\-. ])t(\d+(?:\.\d+)?)s(?=$|[_\-. ])'
+  metadata_time_regex: '(\d{4}[-/.]\d{2}[-/.]\d{2}[ T_]\d{1,2}[:\-.]\d{2}[:\-.]\d{2})'
+  # stripped from a preview / metadata name to find the scan it belongs to
+  companion_suffix_regex: '([_\- ](preview|thumb|image|2d|3d|meta|info))+$'
+
+# (d) RAW height format. null = resolve per file with the ladder in tribo_extract/height_io.py
+# (companion metadata -> text grid -> brute force). Fill these in once known.
+raw:
+  nx: null
+  ny: null
+  dtype: null              # e.g. <f4, <f8, <i2, <u2, <i4
+  header_bytes: null
+  z_scale_um: null         # stored value x z_scale_um = height in um (null: metadata / unit guess)
+  pixel_um: null           # lateral pixel size (null: metadata, else wli.fov_um[objective] / nx)
+  objective: 10x           # key of wli.fov_um used for the pixel-size fallback
+  flip_rows: false         # true if row 0 of the file is the bottom of the image
+  # brute-force search space and acceptance tests
+  offsets: [0, 128, 256, 512, 1024, 2048, 4096]
+  dtypes: ['<f4', '<f8', '<i2', '<u2', '<i4']
+  aspect: [0.25, 4.0]
+  preview_min_r: 0.9
+  plausible_range_um: [0.1, 100.0]

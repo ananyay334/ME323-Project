@@ -1,10 +1,14 @@
-"""Figures for the report (B6): parity, GPR response surfaces, ARD length scales, LOAO
-per-grade errors, trajectory reconstructions and GPR calibration.
+"""Report figures and the "which factor controls COF and wear" tables.
 
-Accuracy statements use out-of-fold predictions only. The GPR response surfaces and
-length scales come from a GPR fitted on all usable runs of a target (description, not
-evaluation). Surface inputs are set physically consistently: speed and Hertz pressure are
-recomputed with ``tribo_extract.physics``; hardness follows the carbon level's mean.
+Accuracy statements use out-of-fold predictions only. GPR length scales, response surfaces
+and the Ridge exponents come from fits on all training rows (description, not evaluation).
+
+* parity (CV, first repeat; and the test set with ``--final``);
+* GPR mean ± σ over ln L × ln f at t = 60 and 120 s, one figure per target;
+* GPR ARD length scales (standardised inputs: small = strong / curved effect);
+* group-permutation importance of the inputs (from the CV tasks, first repeat);
+* Ridge exponents d target / d ln x with group-bootstrap 95 % intervals;
+* per-cycle COF of the centre replicates R04/R14/R20.
 """
 from __future__ import annotations
 
@@ -13,278 +17,173 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-from tribo_extract.physics import two_stage_wear
+from matplotlib.ticker import FixedLocator, FormatStrFormatter, NullLocator
 
 from . import plotting as P
-from .data import TARGETS, TriboData
-from .evaluate import make_design
-from .features import build_X, complete_inputs
-from .metrics import calibration_curve
-from .models.gpr import GPRModel
+from .data import INPUTS, TARGETS, TriboData, load_cof_cycles
+from .evaluate import fit_full
+from .models.registry import get_spec
 
 log = logging.getLogger("ml.interpret")
 
 
-def _oof(preds: pd.DataFrame, target: str, model: str, fs: str, split: str = "gkf5",
-         repeat: int = 0) -> pd.DataFrame:
-    p = preds[(preds["target"] == target) & (preds["model"] == model)
-              & (preds["feature_set"] == fs) & (preds["split"] == split) & (preds["repeat"] == repeat)]
-    return p[~p["censored"].astype(bool)] if "censored" in p else p
-
-
 @P.styled
-def parity_figure(preds: pd.DataFrame, best: pd.DataFrame, out: Path) -> Path | None:
-    """Out-of-fold predicted vs measured, best model per target (gkf5, first repeat)."""
+def parity_figure(preds: pd.DataFrame, best: pd.DataFrame, out: Path, title: str = "") -> Path | None:
+    """Predicted vs measured for the best model per target, coloured by checkpoint."""
     if best.empty:
         return None
     n = len(best)
-    nc = min(4, n)
-    nr = int(np.ceil(n / nc))
-    fig, ax = P.new_fig(nr, nc, w=3.4 * nc, h=3.5 * nr)
+    fig, ax = P.new_fig(1, n, w=3.6 * n, h=3.7)
     for k, b in enumerate(best.itertuples()):
-        a = ax[k // nc, k % nc]
-        p = _oof(preds, b.target, b.model, b.feature_set)
-        P.parity(a, p["y_true"], p["y_pred"], P.model_color(b.model))
-        a.set_title(f"{b.target}: {b.model} ({b.feature_set})", fontsize=9)
-        a.text(0.03, 0.97, f"R² = {b.R2_mean:.2f}", transform=a.transAxes, va="top",
-               color=P.INK2, fontsize=8.5)
-        a.set_xlabel("measured", fontsize=8.5)
-        a.set_ylabel("predicted (out-of-fold)" if k % nc == 0 else "", fontsize=8.5)
-    for k in range(n, nr * nc):
-        ax[k // nc, k % nc].set_visible(False)
+        a = ax[0, k]
+        p = preds[(preds["target"] == b.target) & (preds["model"] == b.model)]
+        p = p[~p["censored"].astype(bool)]
+        lo = np.nanmin([p["y_true"].min(), p["y_pred"].min()])
+        hi = np.nanmax([p["y_true"].max(), p["y_pred"].max()])
+        for i, cp in enumerate(sorted(p["Checkpoint"].unique())):
+            q = p[p["Checkpoint"] == cp]
+            P.parity(a, q["y_true"], q["y_pred"], P.SLOTS[i], label=f"checkpoint {int(cp)}", lo=lo, hi=hi)
+        a.set_title(f"{b.target}: {b.model}", fontsize=9.5)
+        a.text(0.03, 0.97, f"R² = {b.R2_mean:.2f}", transform=a.transAxes, va="top", color=P.INK2, fontsize=8.5)
+        a.set_xlabel("measured")
+        a.set_ylabel("predicted" if k == 0 else "")
+        a.legend(loc="lower right", fontsize=7.5)
+    if title:
+        fig.suptitle(title, x=0.01, ha="left", color=P.INK, fontsize=10.5, fontweight="semibold")
     fig.tight_layout()
     return P.save(fig, out)
 
 
-def fit_full_gpr(data: TriboData, target: str, fs: str, cfg: dict):
-    d = make_design(data, target, fs, cfg, cfg["censoring"]["mode"])
-    if d is None or len(d.frame) < 5:
-        return None, None
-    params = dict((cfg["models"].get("gpr") or {}).get("params") or {})
-    return GPRModel(random_state=cfg["seed"], **params).fit(d.X, d.y), list(d.X.columns)
-
-
 @P.styled
-def gpr_surface(est, cols: list[str], data: TriboData, target: str, n: int, out: Path) -> Path:
-    """GPR mean and model σ over Load × Freq, one column per carbon level, design points on top."""
-    ref = data.runs
-    carbons = sorted(ref["Carbon_pct"].unique())
-    L = np.linspace(ref["Load_N"].min(), ref["Load_N"].max(), n)
-    F = np.linspace(ref["Freq_Hz"].min(), ref["Freq_Hz"].max(), n)
+def gpr_surface(est, data: TriboData, target: str, times: list[float], n: int, out: Path) -> Path:
+    """GPR mean (top) and model σ (bottom) over load x frequency at fixed checkpoint times."""
+    L = np.geomspace(10, 100, n)
+    F = np.geomspace(4, 15, n)
     LL, FF = np.meshgrid(L, F)
     mus, sds = [], []
-    for c in carbons:
-        prim = pd.DataFrame({"Carbon_pct": c, "Load_N": LL.ravel(), "Freq_Hz": FF.ravel()})
-        X = build_X(complete_inputs(prim, ref), cols)
+    for t in times:
+        X = pd.DataFrame({"ln_L": np.log(LL.ravel()), "ln_f": np.log(FF.ravel()), "ln_t": np.log(t)})
         mus.append(est.predict(X).reshape(LL.shape))
         sds.append(est.predict_latent_std(X).reshape(LL.shape))
-    fig, ax = P.new_fig(2, len(carbons), w=3.0 * len(carbons) + 0.8, h=5.8)
-    for row, (vals, cmap, lab) in enumerate(((mus, P.CMAP_MEAN, f"mean {TARGETS[target].label}"),
+    fig, ax = P.new_fig(2, len(times), w=3.4 * len(times) + 0.9, h=6.0)
+    runs = data.frame.drop_duplicates("Experiment_ID")
+    for row, (vals, cmap, lab) in enumerate(((mus, P.CMAP_MEAN, f"mean {TARGETS[target]}"),
                                              (sds, P.CMAP_SD, "σ (model, excl. noise)"))):
         lo, hi = min(v.min() for v in vals), max(v.max() for v in vals)
-        for k, c in enumerate(carbons):
+        for k, t in enumerate(times):
             a = ax[row, k]
             cs = a.contourf(LL, FF, vals[k], levels=P.nice_levels(lo, hi), cmap=cmap)
+            a.set_xscale("log")
+            a.set_yscale("log")
+            for axis, ticks in ((a.xaxis, [10, 20, 30, 50, 100]), (a.yaxis, [4, 6, 8, 10, 15])):
+                axis.set_major_locator(FixedLocator(ticks))
+                axis.set_minor_locator(NullLocator())
+                axis.set_major_formatter(FormatStrFormatter("%g"))
             a.grid(False)
-            pts = ref[np.isclose(ref["Carbon_pct"], c)]
-            P.dots(a, pts["Load_N"], pts["Freq_Hz"], P.INK2, size=22)
-            a.set_title(f"{c:g} % C" if row == 0 else "", fontsize=9.5)
+            P.dots(a, runs["Load_N"], runs["Freq_Hz"], P.INK2, size=20)
+            a.set_title(f"t = {t:g} s" if row == 0 else "", fontsize=9.5)
             a.set_xlabel("load [N]" if row == 1 else "")
             a.set_ylabel("frequency [Hz]" if k == 0 else "")
-        cb = fig.colorbar(cs, ax=list(ax[row, :]), fraction=0.025, pad=0.02)
+        cb = fig.colorbar(cs, ax=list(ax[row, :]), fraction=0.03, pad=0.02)
         cb.set_label(lab, color=P.INK2)
         cb.outline.set_visible(False)
-    fig.suptitle(f"GPR response surface, {target}: mean (top), σ (bottom); dots = design points "
-                 f"(fitted noise sd {np.sqrt(est.noise_var_):.3g})", x=0.01, ha="left",
-                 color=P.INK, fontsize=10)
+    fig.suptitle(f"GPR, {target}: mean (top) ± σ (bottom) over ln L × ln f; dots = training runs "
+                 f"(fitted noise sd {np.sqrt(est.noise_var_):.3g})", x=0.01, ha="left", color=P.INK, fontsize=10)
     return P.save(fig, out)
 
 
 @P.styled
-def lengthscale_figure(ls: dict, out: Path) -> Path | None:
-    """ARD length scales (standardised inputs; small = strong / curved effect)."""
-    if not ls:
+def cof_replicates_figure(cycles: pd.DataFrame, out: Path) -> Path | None:
+    """Per-cycle COF vs sliding time for the centre replicates."""
+    if cycles is None or cycles.empty:
         return None
-    keys = list(ls)
-    fig, ax = P.new_fig(1, len(keys), w=3.1 * len(keys), h=3.3)
-    for k, key in enumerate(keys):
-        a = ax[0, k]
-        names = list(ls[key])
-        a.barh(names, [ls[key][n] for n in names], color=P.SLOTS[0], height=0.6)
-        a.set_xscale("log")
-        a.invert_yaxis()
-        a.grid(axis="y", visible=False)
-        a.set_title(f"{key[0]} ({key[1]})", fontsize=9)
-        a.set_xlabel("length scale")
-    fig.tight_layout()
+    fig, ax = P.new_fig(w=7.5, h=3.4)
+    a = ax[0, 0]
+    for i, (eid, c) in enumerate(cycles.groupby("Experiment_ID")):
+        for s, cs in c.groupby("Step"):
+            a.plot(cs["t_s"], cs["COF_c"], color=P.SLOTS[i % 8], lw=1.0, label=eid if s == c["Step"].min() else None)
+    a.set_xlabel("sliding time [s]")
+    a.set_ylabel("COF per cycle")
+    a.set_title("Centre replicates: per-cycle COF")
+    a.legend(loc="upper right")
     return P.save(fig, out)
 
 
-@P.styled
-def loao_figure(preds: pd.DataFrame, summary: pd.DataFrame, targets: list[str], out: Path,
-                seed: int = 0) -> tuple[Path | None, pd.DataFrame]:
-    """Per held-out grade RMSE (bars) with bootstrap 95 % CI over that grade's runs (whiskers)."""
-    lo = preds[preds["split"] == "loao"]
-    targets = [t for t in targets if t in set(lo["target"])]
-    if not targets:
-        return None, pd.DataFrame()
+def ridge_exponents(data: TriboData, cfg: dict, plan, seed: int) -> pd.DataFrame:
+    """d target / d ln x of Ridge on standardised log inputs, with group-bootstrap 95 % CIs."""
+    spec = get_spec("ridge")
+    B = int(cfg["interpret"].get("bootstrap", 1000))
     rng = np.random.default_rng(seed)
     rows = []
-    fig, ax = P.new_fig(1, len(targets), w=4.2 * len(targets), h=3.5)
-    for k, t in enumerate(targets):
-        a = ax[0, k]
-        s = summary[(summary["target"] == t) & (summary["split"] == "loao")]
-        models = s.sort_values("RMSE_mean").groupby("model").head(1)
-        grades = sorted(lo["fold_label"].unique())
-        w = 0.8 / max(len(models), 1)
-        for i, m in enumerate(models.itertuples()):
-            p = lo[(lo["target"] == t) & (lo["model"] == m.model) & (lo["feature_set"] == m.feature_set)]
-            p = p[~p["censored"].astype(bool)]
-            vals, errs = [], []
-            for g in grades:
-                e = (p.loc[p["fold_label"] == g, "y_pred"] - p.loc[p["fold_label"] == g, "y_true"]).to_numpy()
-                r = float(np.sqrt(np.mean(e ** 2))) if len(e) else np.nan
-                boot = [np.sqrt(np.mean(rng.choice(e, len(e)) ** 2)) for _ in range(200)] if len(e) else [np.nan]
-                vals.append(r)
-                errs.append([r - np.percentile(boot, 2.5), np.percentile(boot, 97.5) - r])
-                rows.append({"target": t, "model": m.model, "feature_set": m.feature_set, "grade": g,
-                             "RMSE": r, "n": len(e)})
-            x = np.arange(len(grades)) + (i - (len(models) - 1) / 2) * w
-            a.bar(x, vals, width=w * 0.9, color=P.model_color(m.model), label=m.model,
-                  yerr=np.array(errs).T, error_kw={"ecolor": P.INK2, "elinewidth": 0.8})
-        a.set_xticks(np.arange(len(grades)), grades)
-        a.grid(axis="x", visible=False)
-        a.set_title(f"LOAO, {t}", fontsize=9.5)
-        a.set_xlabel("held-out grade")
-        a.set_ylabel("RMSE" if k == 0 else "")
-        if k == 0:
-            a.legend(fontsize=7.5)
-    fig.tight_layout()
-    return P.save(fig, out), pd.DataFrame(rows)
+    for j, t in enumerate(data.targets):
+        est, params = fit_full(spec, data, cfg, plan, t)
+        alpha = float(params.get("alpha", (cfg["models"]["ridge"].get("params") or {}).get("alpha", 1.0)))
+        ok = np.isfinite(data.Y[:, j])
+        X, y, g = data.X.to_numpy(float)[ok], data.Y[ok, j], data.groups[ok]
+        point = _ridge_slopes(X, y, alpha)
+        ug = np.unique(g)
+        idx = {u: np.flatnonzero(g == u) for u in ug}
+        boot = np.array([_ridge_slopes(X[s], y[s], alpha) for s in
+                         (np.concatenate([idx[u] for u in rng.choice(ug, len(ug))]) for _ in range(B))])
+        for k, f in enumerate(INPUTS):
+            rows.append({"target": t, "feature": f, "alpha": alpha, "exponent": point[k],
+                         "ci_low": float(np.percentile(boot[:, k], 2.5)),
+                         "ci_high": float(np.percentile(boot[:, k], 97.5)), "n_boot": B})
+    return pd.DataFrame(rows)
 
 
-@P.styled
-def trajectory_figure(data: TriboData, route: pd.DataFrame, preds: pd.DataFrame,
-                      best: pd.DataFrame, out: Path) -> Path | None:
-    """Measured checkpoints vs the physics-route curve and the best direct model (one run per grade)."""
-    if route is None or route.empty or data.checkpoints is None:
-        return None
-    r0 = route[route["repeat"] == 0]
-    fs = r0["feature_set"].iloc[0]
-    r0 = r0[r0["feature_set"] == fs].set_index("Experiment_ID")
-    runs = data.runs.set_index("Experiment_ID")
-    picks = []
-    for spec, sub in data.runs.groupby("Specimen_ID"):
-        cand = [e for e in sub.sort_values("Role", key=lambda s: s != "anchor_center")["Experiment_ID"]
-                if e in r0.index]
-        if cand:
-            picks.append(cand[0])
-    if not picks:
-        return None
-    bd = best[best["target"] == "log10_V_t"]
-    direct = _oof(preds, "log10_V_t", bd["model"].iloc[0], bd["feature_set"].iloc[0]) if len(bd) else None
-    fig, ax = P.new_fig(1, len(picks), w=3.4 * len(picks), h=3.2)
-    tt = np.linspace(0, float(data.checkpoints["Time_s"].max()), 200)
-    for k, e in enumerate(picks):
-        a = ax[0, k]
-        th = r0.loc[e, ["Vdot_steady", "dV_run", "tau_trans"]].to_numpy(float)
-        a.plot(tt, two_stage_wear(tt, *th), color=P.model_color("physics_route"),
-               label=f"physics route ({fs})")
-        cp = data.checkpoints[data.checkpoints["Experiment_ID"] == e]
-        det = cp["Wear_detected"].fillna(False).astype(bool)
-        P.dots(a, cp.loc[det, "Time_s"], cp.loc[det, "Wear_Volume_mm3"], P.INK, size=26,
-               label="measured")
-        if (~det).any():
-            a.scatter(cp.loc[~det, "Time_s"], cp.loc[~det, "Wear_Volume_LOD_mm3"], marker="v",
-                      color=P.MUTED, s=26, label="< LOD")
-        if direct is not None:
-            dd = direct[direct["Experiment_ID"] == e]
-            P.dots(a, dd["Time_s"], 10 ** dd["y_pred"], P.model_color(bd["model"].iloc[0]), size=26,
-                   marker="D", label=f"direct {bd['model'].iloc[0]}")
-        a.set_title(f"{e} ({runs.at[e, 'Specimen_ID']}, {runs.at[e, 'Load_N']:g} N, "
-                    f"{runs.at[e, 'Freq_Hz']:g} Hz)", fontsize=9)
-        a.set_xlabel("time [s]")
-        a.set_ylabel("V_w [mm³]" if k == 0 else "")
-        a.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3))
-    h, lab = ax[0, 0].get_legend_handles_labels()
-    fig.legend(h, lab, loc="upper right", ncol=len(lab), fontsize=8)
-    fig.suptitle("Wear trajectory: out-of-fold reconstructions (gkf5, first repeat)", x=0.01,
-                 ha="left", color=P.INK, fontsize=10.5, fontweight="semibold")
-    fig.tight_layout(rect=(0, 0, 1, 0.86))
-    return P.save(fig, out)
+def _ridge_slopes(X: np.ndarray, y: np.ndarray, alpha: float) -> np.ndarray:
+    """Same fit as StandardScaler + Ridge(alpha); coefficients mapped back to per unit ln x."""
+    mu, sd = X.mean(0), X.std(0)
+    sd = np.where(sd > 0, sd, 1.0)
+    Z = (X - mu) / sd
+    b = np.linalg.solve(Z.T @ Z + alpha * np.eye(Z.shape[1]), Z.T @ (y - y.mean()))
+    return b / sd
 
 
-@P.styled
-def calibration_figure(preds: pd.DataFrame, summary: pd.DataFrame, levels: int,
-                       out: Path) -> tuple[Path | None, pd.DataFrame]:
-    """GPR calibration on gkf5 out-of-fold predictions, one line per target (best feature set)."""
-    s = summary[(summary["model"] == "gpr") & (summary["split"] == "gkf5")]
-    if s.empty:
-        return None, pd.DataFrame()
-    rows = []
-    fig, ax = P.new_fig(w=4.6, h=4.2)
-    a = ax[0, 0]
-    a.plot([0, 1], [0, 1], color=P.AXIS, lw=1)
-    for i, b in enumerate(s.sort_values("RMSE_mean").groupby("target").head(1).itertuples()):
-        p = preds[(preds["target"] == b.target) & (preds["model"] == "gpr")
-                  & (preds["feature_set"] == b.feature_set) & (preds["split"] == "gkf5")]
-        p = p[~p["censored"].astype(bool)]
-        cc = calibration_curve(p["y_true"], p["y_pred"], p["y_std"], np.linspace(0.05, 0.95, levels))
-        a.plot(cc["nominal"], cc["observed"], color=P.SLOTS[i % 8], lw=1.6, label=b.target)
-        rows.append(cc.assign(target=b.target, feature_set=b.feature_set))
-    a.set_xlabel("nominal central-interval coverage")
-    a.set_ylabel("observed coverage (gkf5 outer folds)")
-    a.set_title("GPR calibration")
-    a.set_aspect("equal")
-    a.legend(fontsize=7.5, loc="upper left")
-    return P.save(fig, out), pd.concat(rows, ignore_index=True)
-
-
-def run_interpretation(data: TriboData, cfg: dict, preds: pd.DataFrame, summary: pd.DataFrame,
-                       best: pd.DataFrame, route: pd.DataFrame, out_dir: Path) -> dict:
-    """Produce every figure / table of B6; returns paths and tables for the report."""
+def run_interpretation(data: TriboData, cfg: dict, cv, summary: pd.DataFrame, best: pd.DataFrame,
+                       plan, out_dir: Path, source: str) -> dict:
+    """Every figure / table for the report; returns paths and tables."""
     figs = Path(out_dir) / "figures"
     tables = Path(out_dir) / "interpretation"
     tables.mkdir(exist_ok=True)
-    res: dict = {"figures": {}, "lengthscales": {}, "loao_grades": pd.DataFrame(), "notes": []}
+    res: dict = {"figures": {}, "lengthscales": pd.DataFrame(), "importance": pd.DataFrame(),
+                 "exponents": pd.DataFrame(), "notes": []}
 
     def safe(name, fn, *a, **k):
         try:
             return fn(*a, **k)
         except Exception as exc:                                     # noqa: BLE001
-            log.warning("figure %s failed: %s", name, exc)
+            log.warning("%s failed: %s", name, exc)
             res["notes"].append(f"{name} failed: {type(exc).__name__}: {exc}")
             return None
 
     icfg = cfg["interpret"]
-    endpoint = [t for t in cfg["regimes"]["endpoint"] if t in set(summary["target"])]
-    res["figures"]["parity"] = safe("parity", parity_figure, preds, best, figs / "parity_best.png")
-    for t in endpoint:
-        for fs in cfg["features"]["use"]:
-            est, cols = safe(f"gpr {t} {fs}", fit_full_gpr, data, t, fs, cfg) or (None, None)
-            if est is None:
-                continue
-            res["lengthscales"][(t, fs)] = est.length_scales_
-            if fs == "base":
-                res["figures"][f"gpr_surface_{t}"] = safe(
-                    f"gpr surface {t}", gpr_surface, est, cols, data, t, int(icfg.get("map_points", 41)),
-                    figs / f"gpr_surface_{t}.png")
-    res["figures"]["gpr_lengthscales"] = safe("length scales", lengthscale_figure,
-                                              res["lengthscales"], figs / "gpr_lengthscales.png")
-    if res["lengthscales"]:
-        pd.DataFrame([{"target": t, "feature_set": fs, **ls} for (t, fs), ls in
-                      res["lengthscales"].items()]).to_csv(tables / "gpr_lengthscales.csv", index=False)
-    r = safe("loao", loao_figure, preds, summary, endpoint, figs / "loao_per_grade.png", cfg["seed"])
-    if r:
-        res["figures"]["loao_per_grade"], res["loao_grades"] = r
-        r[1].to_csv(tables / "loao_per_grade.csv", index=False)
-    res["figures"]["trajectory"] = safe("trajectory", trajectory_figure, data, route, preds, best,
-                                        figs / "trajectory_reconstruction.png")
-    r = safe("calibration", calibration_figure, preds, summary, int(icfg.get("calibration_levels", 19)),
-             figs / "gpr_calibration.png")
-    if r:
-        res["figures"]["gpr_calibration"] = r[0]
-        r[1].to_csv(tables / "gpr_calibration.csv", index=False)
+    preds0 = cv.predictions[cv.predictions["repeat"] == 0]
+    res["figures"]["parity"] = safe("parity", parity_figure, preds0, best, figs / "parity_cv.png",
+                                    "Out-of-fold predictions (first repeat)")
+    ls_rows = []
+    gpr = get_spec("gpr")
+    for t in data.targets:
+        r = safe(f"gpr {t}", fit_full, gpr, data, cfg, plan, t)
+        if r is None:
+            continue
+        est = r[0]
+        ls_rows.append({"target": t, **est.length_scales_})
+        res["figures"][f"gpr_surface_{t}"] = safe(
+            f"gpr surface {t}", gpr_surface, est, data, t, list(icfg.get("surface_times_s", [60, 120])),
+            int(icfg.get("map_points", 41)), figs / f"gpr_surface_{t}.png")
+    res["lengthscales"] = pd.DataFrame(ls_rows)
+    if len(cv.importance):
+        res["importance"] = (cv.importance.groupby(["model", "target", "feature"])["delta_rmse"]
+                             .agg(["mean", "std"]).reset_index())
+    if "ridge" in set(summary["model"]):
+        res["exponents"] = safe("ridge exponents", ridge_exponents, data, cfg, plan, cfg["seed"])
+    cyc = load_cof_cycles(cfg, source, cfg["data"]["replicates"])
+    res["figures"]["cof_replicates"] = safe("cof replicates", cof_replicates_figure, cyc,
+                                            figs / "cof_replicates.png")
+    for name in ("lengthscales", "importance", "exponents"):
+        if res[name] is not None and len(res[name]):
+            res[name].to_csv(tables / f"{name}.csv", index=False)
     res["figures"] = {k: v for k, v in res["figures"].items() if v}
     return res
