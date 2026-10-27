@@ -401,13 +401,31 @@ def subtract_baseline(worn: HeightMap, base: HeightMap, max_shift_px: int = 60):
 # ---------------------------------------------------------------------------
 # rough-surface track measurement ("band" method)
 # ---------------------------------------------------------------------------
-def _band_plane(z: np.ndarray, use: np.ndarray) -> np.ndarray:
+def _band_plane(z: np.ndarray, use: np.ndarray, clip_sigma: float | None = None) -> np.ndarray:
+    """Plane fitted to the ``use`` pixels. With ``clip_sigma`` (idea from the TA's analyze_wear.py):
+    3 passes that drop pixels more than clip_sigma x SD from the fit (pits, debris, defects)."""
     ny, nx = z.shape
     yy, xx = np.mgrid[0:ny, 0:nx]
     ok = use & np.isfinite(z)
-    A = np.c_[xx[ok], yy[ok], np.ones(ok.sum())]
-    c, *_ = np.linalg.lstsq(A, z[ok], rcond=None)
+    for it in range(4 if clip_sigma else 1):
+        A = np.c_[xx[ok], yy[ok], np.ones(ok.sum())]
+        c, *_ = np.linalg.lstsq(A, z[ok], rcond=None)
+        if clip_sigma and it < 3:
+            res = z - (c[0] * xx + c[1] * yy + c[2])
+            sd = np.nanstd(res[ok])
+            ok = ok & (np.abs(res - np.nanmedian(res[ok])) < clip_sigma * sd)
     return c[0] * xx + c[1] * yy + c[2]
+
+
+def _clipped_row_mean(zl: np.ndarray, clip_sigma: float | None) -> np.ndarray:
+    """Mean along each row; with ``clip_sigma`` the row's outliers (pits, debris) are left out first."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        if not clip_sigma:
+            return np.nanmean(zl, axis=1)
+        med = np.nanmedian(zl, axis=1, keepdims=True)
+        sd = np.nanstd(zl, axis=1, keepdims=True)
+        return np.nanmean(np.where(np.abs(zl - med) <= clip_sigma * sd, zl, np.nan), axis=1)
 
 
 def _row_roughness(z: np.ndarray, win: int) -> np.ndarray:
@@ -443,7 +461,9 @@ def measure_track_band(hm: HeightMap, cfg: dict) -> tuple[dict, dict]:
     Returns ``(result, internals)`` with the keys of :func:`measure_wear_scar`.
     """
     b = cfg["wear"].get("band", {})
-    z = hm.z - _band_plane(hm.z, np.ones_like(hm.z, bool))
+    clip = b.get("clip_sigma")                      # TA idea: sigma-clipped reference and profile
+    sg = int(b.get("profile_savgol_px", 0) or 0)    # TA idea: Savitzky-Golay smoothing of the profile
+    z = hm.z - _band_plane(hm.z, np.ones_like(hm.z, bool), clip)
     dx, dy = hm.dx_um, hm.dy_um
     axis = b.get("track_axis", "x")
     win = int(b.get("hp_window_px", 15))
@@ -485,10 +505,8 @@ def measure_track_band(hm: HeightMap, cfg: dict) -> tuple[dict, dict]:
     one_sided = outside[:bL].sum() < min_side or outside[bR + 1:].sum() < min_side
     if one_sided:
         flags.append("reference_one_sided")
-    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        prof = np.nanmean(zl, axis=1)
+    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape), clip)
+    prof = _clipped_row_mean(zl, clip)
     sm0 = ndi.gaussian_filter1d(prof, 3)
     if R < bR:                                     # right ridge foot
         p = R + int(np.argmax(sm0[R:bR + 1]))
@@ -517,10 +535,11 @@ def measure_track_band(hm: HeightMap, cfg: dict) -> tuple[dict, dict]:
         flags.append("little_unworn_reference")
     if one_sided:
         flags.append("reference_one_sided")
-    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        prof = np.nanmean(zl, axis=1)
+    zl = z - _band_plane(z, np.broadcast_to(outside[:, None], z.shape), clip)
+    prof = _clipped_row_mean(zl, clip)
+    if sg and len(prof) > sg:
+        from scipy.signal import savgol_filter
+        prof = savgol_filter(prof, sg if sg % 2 else sg + 1, 3)
     sm0 = ndi.gaussian_filter1d(prof, 3)
     band = slice(bL, bR + 1)
     groove = float(np.clip(-prof[band], 0, None).sum() * dy)
@@ -538,5 +557,8 @@ def measure_track_band(hm: HeightMap, cfg: dict) -> tuple[dict, dict]:
         "track_width_um": (R - L + 1) * dy, "band_width_um": (bR - bL + 1) * dy,
         "track_max_depth_um": float(-sm0[band].min()), "track_max_ridge_um": float(sm0[band].max()),
         "groove_unc_um2": unc, "area_LOD_um2": 2.0 * unc, "reference_ok": not one_sided,
+        # TA-style descriptors: depth cutoff = max(2.5 x SD of the reference profile, 0.25 um); pile-up / groove
+        "ta_depth_cutoff_um": max(2.5 * float(np.std(sm0[outside])), 0.25),
+        "plasticity_ratio": pile / groove if groove > 0 else np.nan,
         "Sa_unworn_um": sa_un, "Sa_track_um": sa_tr, "wear_flags": ";".join(flags)})
     return out, {"z": zl, "rough": rough, "prof": prof, "band": (bL, bR), "core": (L, R), "dx": dx, "dy": dy}

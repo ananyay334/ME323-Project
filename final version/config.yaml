@@ -1,0 +1,87 @@
+# ME 323 tribology project - final pipeline configuration.
+# Paths are relative to this file's folder unless absolute.
+
+paths:
+  testdata: ../testdata          # raw run folders (R01, R02, ...); never written to
+  inputs: inputs                 # run_sheet.csv, ponnuswamy2024_table5.csv, analyze_wear.py
+  outputs: outputs               # everything generated
+
+seed: 42
+n_jobs: -1                       # joblib workers (-1 = all cores)
+
+experiment:
+  stroke_amplitude_mm: 5.0       # A; track length 2A = 10 mm, one cycle = 4A = 20 mm
+  track_length_mm: 10.0
+  ball_radius_mm: 3.0
+
+doe_match:                       # relative tolerances when matching a run to its DOE row by value
+  load: 0.02
+  freq: 0.02
+  time: 0.03
+
+cof:
+  freq_threshold_hz: 0.5         # sliding = logged frequency above this
+  block_halfrange_frac: 0.30     # without a frequency channel: block Fx half-range/Fz >= 30 % of the largest
+  min_block_rows: 10
+  ramp_trim_s: 1.0               # trimmed at both ends of the sliding step
+  median_window_s: 0.02          # Fx moving median before reversal detection
+  hysteresis_frac: 0.20          # x half-range
+  cycle_check_tol: 0.02          # counted cycles vs f*t
+  first_window_s: 10.0           # COF_first10s
+  last_window_s: 10.0            # COF_last10s
+  dist_window_m: [0.5, 2.0]      # COF_0.5_2m
+
+wear:
+  clip_sigma: 2.0                # robust levelling: drop pixels > 2 SD from the fit
+  level_passes: 3
+  highpass_px: 15                # moving mean subtracted along each row
+  highpass_mode: row             # row = 1-D along the track (spec); box = 15x15 2-D (earlier implementation, C2 sensitivity)
+  smooth_sigma_rows: 3           # Gaussian smoothing of the row roughness across rows
+  outer_frac: 0.15               # outer rows used for R_unworn (each side)
+  track_percentile: 5            # R_track = P5 of the row roughness
+  min_contrast: 0.30             # below: no track found
+  core_threshold: 0.5            # core rows: R < R_track + 0.5 (R_unworn - R_track)
+  band_expand: 0.40              # band = core +/- 40 % of the core width
+  ref_margin_um: 10.0            # gap between band and reference rows
+  min_unworn_um: 110.0           # unworn rows needed on BOTH sides for a valid reference
+  corr_length_um: 50.0           # texture correlation length for n_eff
+  lod_factor: 2.0                # LOD = 2u
+  ta_cutoff_sd: 2.5              # TA depth rule (C2/C6): points shallower than max(2.5 SD, 0.25 um) dropped
+  ta_cutoff_min_um: 0.25
+
+models:
+  inputs: [lnL, lnf, lnt]
+  ann:
+    hidden: [3, 4]
+    alpha: [0.001, 0.01, 0.1, 1.0]
+    n_seeds: 20                  # ensemble size for the reported prediction
+    n_inner_seeds: 5             # ensemble size inside the inner CV used to pick hidden/alpha
+    max_iter: 5000
+    inner_folds: 5
+  gpr:
+    nu: 2.5
+    n_restarts: 5
+  ridge:
+    alpha: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+  svr:
+    C: [0.1, 1, 10, 100]
+    gamma: [scale, 0.1, 1]
+    epsilon: [0.01, 0.05, 0.1]
+  xgb:
+    max_depth: [1, 2]
+    n_estimators: [200, 400]
+    learning_rate: [0.03, 0.05]
+    subsample: 0.8
+  tabpfn:
+    device: cpu
+
+evaluate:
+  inner_folds: 5
+  n_bootstrap: 1000              # run bootstrap (resampling replicate groups)
+  n_permutations: 2000           # permutation-test shuffles for the physics baselines (exact, vectorised)
+  n_permutations_gpr: 300        # GPR + physics: each shuffle refits all LOGO folds (compute budget, see README)
+  n_permutations_ann: 100        # ANN + physics: each shuffle refits all LOGO folds x an ensemble (see README)
+  perm_ann_seeds: 3              # ANN ensemble size inside the permutation test (hyper-parameters fixed)
+  perm_gpr_restarts: 0           # GPR optimiser restarts inside the permutation test
+  interval_z: 1.96
+  n_importance_repeats: 50

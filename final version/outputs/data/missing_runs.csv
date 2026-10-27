@@ -1,0 +1,8 @@
+run_id,Experiment_ID,Session,Face,X_mm,Y_mm,Load_N,Freq_Hz,Run_time_s,Cycles_nominal,Role,Replicate_of,Include,Hardness_HV,Ra_um,Ambient_T_C,RH_pct,Ball_scar_d1_um,Ball_scar_d2_um,Notes
+R00,R00,0,,,,10.0,10.0,120,1200,completed,,Y,,,,,,,
+R03,R03,1,F2,21.0,21.0,100.0,15.0,60,900,corner,,Y,,,,,,,
+R15,R15,3,F1,21.0,33.0,33.0,15.0,60,900,interior,,Y,,,,,,,
+R16,R16,4,F2,34.0,39.0,75.0,10.0,120,1200,corner,,Y,,,,,,,
+R18,R18,4,F2,8.0,24.0,35.0,10.0,96,960,interior,,Y,,,,,,,
+R23,R23,5,F2,21.0,9.0,59.0,9.5,90,855,interior,,Y,,,,,,,
+R27,R27,7,F1,34.0,33.0,28.5,14.0,72,1008,test,,Y,,,,,,,

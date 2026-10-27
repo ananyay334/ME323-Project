@@ -1,0 +1,61 @@
+target,model,verdict
+COF_first10s,constant,reference
+COF_first10s,physics,physics baseline (final model)
+COF_first10s,powerlaw,worse than physics
+COF_first10s,ridge,worse than physics
+COF_first10s,svr,no better than constant
+COF_first10s,xgb,unstable (beats constant in P1 only)
+COF_first10s,ann,worse than physics
+COF_first10s,gpr,no better than constant
+COF_first10s,tabpfn,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+COF_first10s,ann_phys,chosen (selected ML model); not better than physics
+COF_first10s,gpr_phys,worse than physics
+COF_first10s,tabpfn_phys,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+COF_end,constant,reference
+COF_end,physics,physics baseline (final model)
+COF_end,powerlaw,no better than constant
+COF_end,ridge,no better than constant
+COF_end,svr,tied with best (not a required model)
+COF_end,xgb,no better than constant
+COF_end,ann,"beats constant, not tied with best"
+COF_end,gpr,unstable (beats constant in P1 only)
+COF_end,tabpfn,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+COF_end,ann_phys,unstable (beats constant in P1 only)
+COF_end,gpr_phys,unstable (beats constant in P1 only)
+COF_end,tabpfn_phys,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_V,constant,reference
+log10_V,physics,physics baseline (final model)
+log10_V,powerlaw,worse than physics
+log10_V,ridge,worse than physics
+log10_V,svr,worse than physics
+log10_V,xgb,worse than physics
+log10_V,ann,chosen (selected ML model); not better than physics
+log10_V,gpr,worse than physics
+log10_V,tabpfn,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_V,ann_phys,"beats constant, not tied with best"
+log10_V,gpr_phys,worse than physics
+log10_V,tabpfn_phys,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_width,constant,reference
+log10_width,physics,physics baseline (final model)
+log10_width,powerlaw,tied with best (not a required model)
+log10_width,ridge,worse than physics
+log10_width,svr,tied with best (not a required model)
+log10_width,xgb,tied with best (not a required model)
+log10_width,ann,no better than constant
+log10_width,gpr,tied with best
+log10_width,tabpfn,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_width,ann_phys,worse than physics
+log10_width,gpr_phys,chosen (selected ML model); not better than physics
+log10_width,tabpfn_phys,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_k,constant,reference
+log10_k,physics,physics baseline (final model)
+log10_k,powerlaw,no better than constant
+log10_k,ridge,no better than constant
+log10_k,svr,no better than constant
+log10_k,xgb,no better than constant
+log10_k,ann,tied with best
+log10_k,gpr,no better than constant
+log10_k,tabpfn,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+log10_k,ann_phys,chosen (selected ML model)
+log10_k,gpr_phys,no better than constant
+log10_k,tabpfn_phys,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)

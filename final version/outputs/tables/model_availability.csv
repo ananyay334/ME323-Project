@@ -1,0 +1,13 @@
+model,label,family,required,status
+constant,Constant,reference,False,run
+physics,Physics,physics,False,run
+powerlaw,Power law (OLS),comparison,False,run
+ridge,Ridge,comparison,False,run
+svr,SVR,comparison,False,run
+xgb,XGBoost,comparison,False,run
+ann,ANN,required,True,run
+gpr,GPR,required,True,run
+tabpfn,TabPFN,required,True,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+ann_phys,ANN + physics,hybrid,True,run
+gpr_phys,GPR + physics,hybrid,True,run
+tabpfn_phys,TabPFN + physics,hybrid,True,not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)

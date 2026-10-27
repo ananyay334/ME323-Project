@@ -199,6 +199,8 @@ python -m ml.train                        # CV on the training runs -> ml/result
 python -m ml.train --config ml/configs/width.yaml          # same with track width instead of k
 python -m ml.train --config ml/configs/width.yaml --final  # its sealed test -> ml/results/final_width/
 python -m ml.session_effect               # test-day effect on the training runs
+python -m ml.campaign_model               # final model: all 23 runs, test day as blocking factor
+                                          #   -> ml/results/campaign_model/report.md
 python -m ml.topup --n 4                  # next runs -> data/topup_candidates.csv (pre-registered)
 python -m ml.train --final                # refit, score R24-R29 once -> ml/results/final/
 ```
@@ -215,6 +217,12 @@ python -m ml.train --final                # refit, score R24-R29 once -> ml/resu
   the runs are made. Append the chosen rows (T01…) to `run_sheet.csv` with `Role = topup`,
   run them, `organize`, `extract`. The next report then shows predicted vs measured for them,
   and they join the training set.
+- **Campaign model (`ml/campaign_model.py`).** With no further runs possible, this is the model to report.
+  It uses all 23 runs, one row per run, and leave-one-group-out CV. The test day, read from the CSV header, is
+  a blocking factor; plate roughness is offered as the physical alternative. It compares input sets × models
+  (linear, ridge, GPR, ANN ensemble) and flags candidates tied with the best (1-SE rule). It fits the
+  physics-shaped models COF = μ₀ + c·L^(−1/3) + day offset and w = A·L^b·(day factor), with run-bootstrap
+  intervals. The sealed-test result from `--final` stays the pre-registered number.
 - **Test seal.** The test runs are loaded only by `--final`. It refuses to run again once
   `ml/results/final/` exists, unless `--force` is given.
 

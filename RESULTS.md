@@ -116,3 +116,29 @@ model predicts the training mean.
   a two-sided reference.
 - The 100 Hz logging gives 7–25 samples per cycle; the windowed half-range COF handles this.
 - TabPFN was not run (not installed); torch is not needed (numpy ANN backend).
+
+## 6. Final model, using all runs (`python -m ml.campaign_model`)
+
+No further runs can be made, so the model to report uses all 23 runs, one row per run, evaluated with
+leave-one-group-out CV. The test day (read from each CSV) is a blocking factor. Details and all candidates
+are in `ml/results/campaign_model/report.md`. The sealed-test numbers in section 3 remain the pre-registered result.
+
+| target | inputs → model | CV R² | CV RMSE | same inputs without the day |
+|---|---|---|---|---|
+| COF_steady | L^−1/3 + day → linear (recommended) | +0.33 | 0.0102 | −0.15 (linear on L, f, t) |
+| COF_steady | day → ANN ensemble | +0.34 | 0.0101 | −0.09 (ANN on L, f, t) |
+| log10 track width | ln L + day → linear (recommended) | +0.41 | 0.127 dex | +0.13 (linear on L, f, t) |
+
+Most COF candidates that include the day are statistically tied (1-SE rule); the physics-shaped linear model is
+recommended because it has three parameters and a physical meaning.
+
+**Fitted relations** (95 % run-bootstrap intervals):
+- COF = 0.139 + 0.030·L^(−1/3), with 0.015 lower on 16 Oct (0.008 to 0.023).
+  - The load term predicts COF falling by 0.008 from 10 N to 100 N (−0.022 to +0.004).
+  - That is the direction contact theory predicts, but far weaker than a pure adhesion law μ ∝ L^(−1/3), which
+    would halve COF, and not statistically resolved.
+  - Frequency and time have no detectable effect.
+- Track width w ∝ L^0.40 (0.22 to 0.56), with widths ×0.71 on 16 Oct. Hertz contact predicts L^1/3, inside the
+  interval. Part of the 16 Oct factor is probably the width under-read described in section 5.
+- Plate roughness can replace the day label with the same accuracy (R² +0.31), because it separates the two days
+  perfectly; the data cannot tell which explanation is right.
