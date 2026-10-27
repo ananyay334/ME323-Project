@@ -1,0 +1,320 @@
+16:49:46 INFO    run_all: stages extract, dataset, models, evaluate, compare, figures, report, readme; testdata = /Users/ananyay/Desktop/323_project/testdata
+16:49:47 INFO    === stage extract ===
+16:49:47 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/testdata
+16:49:47 INFO    extraction: 0 cached, 23 to compute
+16:50:32 INFO      R01 extracted in 7.3 s
+16:50:32 INFO      R02 extracted in 8.0 s
+16:50:32 INFO      R04 extracted in 7.1 s
+16:50:32 INFO      R05 extracted in 7.8 s
+16:50:32 INFO      R06 extracted in 7.6 s
+16:50:32 INFO      R07 extracted in 8.6 s
+16:50:32 INFO      R08 extracted in 7.0 s
+16:50:32 INFO      R09 extracted in 7.5 s
+16:50:32 INFO      R10 extracted in 15.4 s
+16:50:32 INFO      R11 extracted in 11.6 s
+16:50:32 INFO      R12 extracted in 10.2 s
+16:50:32 INFO      R13 extracted in 18.7 s
+16:50:32 INFO      R14 extracted in 15.9 s
+16:50:32 INFO      R17 extracted in 14.7 s
+16:50:32 INFO      R19 extracted in 11.6 s
+16:50:32 INFO      R20 extracted in 18.3 s
+16:50:32 INFO      R21 extracted in 19.6 s
+16:50:32 INFO      R22 extracted in 18.2 s
+16:50:32 INFO      R24 extracted in 20.5 s
+16:50:32 INFO      R25 extracted in 19.7 s
+16:50:32 INFO      R26 extracted in 17.7 s
+16:50:32 INFO      R28 extracted in 18.6 s
+16:50:32 INFO      R29 extracted in 15.7 s
+16:50:32 INFO    === stage extract done in 45.5 s ===
+16:50:32 INFO    === stage dataset ===
+16:50:32 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/testdata
+16:50:32 INFO    extraction: 23 cached, 0 to compute
+16:50:33 INFO    dataset: 23 runs; DOE rows without data: R00, R03, R15, R16, R18, R23, R27
+16:50:33 INFO    dataset: 23 runs, wear status {'detected': 16, 'below_LOD': 6, 'not_measurable': 1}
+16:50:33 INFO    === stage dataset done in 1.0 s ===
+16:50:33 INFO    === stage models ===
+16:50:39 WARNING model TabPFN: not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+16:50:39 WARNING model TabPFN + physics: not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+16:50:39 INFO    models: 1680 fit/predict tasks (5 targets x 10 models x P1/P2/P3 folds)
+16:59:55 INFO    models: done in 556 s
+16:59:55 INFO    === stage models done in 562.0 s ===
+16:59:55 INFO    === stage evaluate ===
+17:00:33 INFO    influence check COF_first10s / ann_phys without R02: R2 0.33 (constant -0.10, physics 0.36)
+17:00:46 INFO    influence check log10_V / ann without R24: R2 0.33 (constant -0.16, physics 0.18)
+17:00:46 INFO    influence check log10_width / gpr_phys without R12: R2 0.05 (constant -0.10, physics 0.10)
+17:01:00 INFO    influence check log10_k / ann_phys without R11: R2 -0.32 (constant -0.17, physics -0.17)
+17:01:00 INFO    selection:
+      target selected_ml final_model
+COF_first10s    ann_phys     physics
+     COF_end                 physics
+     log10_V         ann     physics
+ log10_width    gpr_phys     physics
+     log10_k    ann_phys     physics
+17:01:05 INFO    interpretation tables done in 3 s
+17:01:42 INFO    permutation COF_first10s gpr_phys: 300 shuffles in 37 s
+17:01:55 INFO    permutation COF_first10s ann_phys: 100 shuffles in 13 s
+17:02:33 INFO    permutation COF_end gpr_phys: 300 shuffles in 38 s
+17:03:49 INFO    permutation COF_end ann_phys: 100 shuffles in 76 s
+17:04:12 INFO    permutation log10_V gpr_phys: 300 shuffles in 23 s
+17:04:48 INFO    permutation log10_V ann_phys: 100 shuffles in 36 s
+17:05:25 INFO    permutation log10_width gpr_phys: 300 shuffles in 37 s
+17:05:46 INFO    permutation log10_width ann_phys: 100 shuffles in 21 s
+17:06:11 INFO    permutation log10_k gpr_phys: 300 shuffles in 24 s
+17:06:49 INFO    permutation log10_k ann_phys: 100 shuffles in 39 s
+17:06:49 INFO    === stage evaluate done in 414.2 s ===
+17:06:49 INFO    === stage compare ===
+17:06:50 INFO    C1: Use COF_first10s: it follows the adhesion law best among the definitions (P1 R² +0.36, P2 +0.23; end-of-run COF +0.08) with signal-to-noise 2.2; the instrument mean reads 13 % low and its ratio to ours falls with frequency (r = -0.70).
+17:06:50 INFO    C2: Use the most-worn valid location with robust levelling: 16 runs measurable with an LOD, replicate SD 0.07 dex, Archard R² P1 +0.29 / P2 +0.15; the old mean-of-locations, plain-levelling measure gives 0.34 dex and R² +0.08 / +0.01. Exponents: V ~ L^0.96 [0.41, 1.59] S^-0.07 [-1.32, 1.61] (Archard: 1, 1). The TA depth rule scores a higher R² (+0.52) only because it drops the shallow part of every groove: runs at <= 25 N keep a median 11 % of their groove, runs at >= 60 N 91 %, which inflates the load exponent to 1.9; it is not a volume.
+17:09:13 INFO    C3: COF first 10 s: final = physics law (selected ML: ANN + physics); COF end: final = physics law (selected ML: none); log10 V: final = physics law (selected ML: ANN); log10 width: final = physics law (selected ML: GPR + physics); log10 k: final = physics law (selected ML: ANN + physics).
+17:10:55 INFO    C4: Replace the old pipeline. COF: the old ANN on end-of-run COF scores R² +0.40 in P1 but +0.00 on the training runs (P2); the final model on COF_first10s scores +0.36 / +0.23 with two parameters. Wear: R² -0.48 / -0.47 (ANN on mean-of-locations k, plain levelling, replicate SD 0.34 dex) -> +0.29 / +0.15 (final model on the most-worn-location volume, replicate SD 0.07 dex).
+17:12:48 INFO    C5: Do not use the literature data: paper COF ~ L^+0.52 v^-0.69 vs ours L^-0.09 v^-0.05; log10_COF: best with paper data GPR + study flag R² +0.24 vs ours alone +0.28; log10_k: best with paper data pooled + study offset: power law R² -0.31 vs ours alone +0.41. The published COF (0.002-0.007) and volumes (up to 1620 mm³ in 200 s) are implausible as printed.
+17:13:00 INFO    C6: Do not use the TA script as written: 25 of 92 scans are read along the track, and the R04/R14/R20 replicates spread 30x in k (SD 0.84 dex); fixed copy 0.13 dex, ours 0.07 dex (R14/R20 only). Archard R² (P1): original -0.03, fixed -0.19, ours +0.29.
+17:13:00 INFO    === stage compare done in 370.6 s ===
+17:13:00 INFO    === stage figures ===
+17:13:01 INFO    figure fig01_pipeline
+17:13:02 INFO    figure fig02_test_matrix
+17:13:03 INFO    figure fig03_raw_signal
+17:13:05 INFO    figure fig04_cof_time
+17:13:07 INFO    figure fig05_height_map
+17:13:09 INFO    figure fig06_robust_levelling
+17:13:10 INFO    figure fig07_wear_per_run
+17:13:11 INFO    figure fig08_c1_cof_definitions
+17:13:11 INFO    figure fig09_c2_wear_measures
+17:13:13 INFO    figure fig10_physics_fits
+17:13:13 INFO    figure fig11_c3_models
+17:13:14 INFO    figure fig12_stability
+17:13:15 INFO    figure fig13_parity
+17:13:16 INFO    figure fig14_residuals
+17:13:17 INFO    figure fig15_confusion
+17:13:17 INFO    figure fig16_uncertainty
+17:13:18 INFO    figure fig17_interpretation
+17:13:19 INFO    figure fig18_surfaces
+17:13:20 INFO    figure fig19_c4_old_vs_final
+17:13:21 INFO    figure fig20_c5_literature
+17:13:22 INFO    figure fig21_c6_ta_script
+17:13:23 INFO    figure fig22_p3_holdout
+17:13:23 INFO    === stage figures done in 22.7 s ===
+17:13:23 INFO    === stage report ===
+17:13:43 INFO    === stage report done in 20.1 s ===
+17:13:43 INFO    === stage readme ===
+17:13:43 INFO    === stage readme done in 0.1 s ===
+17:13:43 INFO    run_all finished in 23.9 min
+17:13:43 INFO    === stage readme ===
+17:13:43 INFO    === stage readme done in 0.1 s ===
+17:14:13 INFO    run_all: stages report, readme; testdata = /Users/ananyay/Desktop/323_project/testdata
+17:14:13 INFO    === stage report ===
+17:14:29 INFO    === stage report done in 16.0 s ===
+17:14:29 INFO    === stage readme ===
+17:14:29 INFO    === stage readme done in 0.1 s ===
+17:14:29 INFO    run_all finished in 0.3 min
+17:14:51 INFO    run_all: stages report; testdata = /Users/ananyay/Desktop/323_project/testdata
+17:14:51 INFO    === stage report ===
+17:15:06 INFO    === stage report done in 15.1 s ===
+17:15:06 INFO    run_all finished in 0.3 min
+17:15:15 INFO    run_all: stages report; testdata = /Users/ananyay/Desktop/323_project/testdata
+17:15:15 INFO    === stage report ===
+17:15:30 INFO    === stage report done in 15.1 s ===
+17:15:30 INFO    run_all finished in 0.3 min
+17:15:43 INFO    run_all: stages report; testdata = /Users/ananyay/Desktop/323_project/testdata
+17:15:43 INFO    === stage report ===
+17:15:56 INFO    === stage report done in 13.7 s ===
+17:15:56 INFO    run_all finished in 0.2 min
+17:16:19 INFO    run_all: stages figures, report; testdata = /Users/ananyay/Desktop/323_project/testdata
+17:16:19 INFO    === stage figures ===
+17:16:20 INFO    figure fig01_pipeline
+17:16:20 INFO    figure fig02_test_matrix
+17:16:21 INFO    figure fig03_raw_signal
+17:16:22 INFO    figure fig04_cof_time
+17:16:23 INFO    figure fig05_height_map
+17:16:24 INFO    figure fig06_robust_levelling
+17:16:25 INFO    figure fig07_wear_per_run
+17:16:25 INFO    figure fig08_c1_cof_definitions
+17:16:25 INFO    figure fig09_c2_wear_measures
+17:16:26 INFO    figure fig10_physics_fits
+17:16:27 INFO    figure fig11_c3_models
+17:16:27 INFO    figure fig12_stability
+17:16:28 INFO    figure fig13_parity
+17:16:28 INFO    figure fig14_residuals
+17:16:29 INFO    figure fig15_confusion
+17:16:29 INFO    figure fig16_uncertainty
+17:16:30 INFO    figure fig17_interpretation
+17:16:30 INFO    figure fig18_surfaces
+17:16:31 INFO    figure fig19_c4_old_vs_final
+17:16:31 INFO    figure fig20_c5_literature
+17:16:32 INFO    figure fig21_c6_ta_script
+17:16:33 INFO    figure fig22_p3_holdout
+17:16:33 INFO    === stage figures done in 13.3 s ===
+17:16:33 INFO    === stage report ===
+17:16:46 INFO    === stage report done in 13.6 s ===
+17:16:46 INFO    run_all finished in 0.5 min
+17:28:58 INFO    run_all: stages extract, dataset, models, evaluate, compare, figures, report, readme; testdata = /Users/ananyay/Desktop/323_project/final version/testdata
+17:28:58 INFO    === stage extract ===
+17:28:58 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/final version/testdata
+17:28:58 INFO    extraction: 0 cached, 23 to compute
+17:29:22 INFO      R01 extracted in 6.8 s
+17:29:22 INFO      R02 extracted in 7.6 s
+17:29:22 INFO      R04 extracted in 6.8 s
+17:29:22 INFO      R05 extracted in 7.2 s
+17:29:22 INFO      R06 extracted in 7.4 s
+17:29:22 INFO      R07 extracted in 8.0 s
+17:29:22 INFO      R08 extracted in 6.6 s
+17:29:22 INFO      R09 extracted in 7.3 s
+17:29:22 INFO      R10 extracted in 6.7 s
+17:29:22 INFO      R11 extracted in 5.2 s
+17:29:22 INFO      R12 extracted in 4.4 s
+17:29:22 INFO      R13 extracted in 8.0 s
+17:29:22 INFO      R14 extracted in 6.9 s
+17:29:22 INFO      R17 extracted in 6.2 s
+17:29:22 INFO      R19 extracted in 4.9 s
+17:29:22 INFO      R20 extracted in 7.8 s
+17:29:22 INFO      R21 extracted in 7.6 s
+17:29:22 INFO      R22 extracted in 6.8 s
+17:29:22 INFO      R24 extracted in 7.6 s
+17:29:22 INFO      R25 extracted in 7.5 s
+17:29:22 INFO      R26 extracted in 6.4 s
+17:29:22 INFO      R28 extracted in 6.6 s
+17:29:22 INFO      R29 extracted in 5.6 s
+17:29:22 INFO    === stage extract done in 24.1 s ===
+17:29:22 INFO    === stage dataset ===
+17:29:22 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/final version/testdata
+17:29:22 INFO    extraction: 23 cached, 0 to compute
+17:29:22 INFO    dataset: 23 runs; DOE rows without data: R00, R03, R15, R16, R18, R23, R27
+17:29:22 INFO    dataset: 23 runs, wear status {'detected': 16, 'below_LOD': 6, 'not_measurable': 1}
+17:29:22 INFO    === stage dataset done in 0.2 s ===
+17:29:22 INFO    === stage models ===
+17:29:25 WARNING model TabPFN: not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+17:29:25 WARNING model TabPFN + physics: not run (tabpfn installed but cannot load weights: TabPFNLicenseError: TabPFN requires a one-time license acceptance to download)
+17:29:25 INFO    oof: using cache oof_57178b3d92bd.pkl
+17:29:25 INFO    === stage models done in 2.9 s ===
+17:29:25 INFO    === stage evaluate ===
+17:29:38 INFO    influence check COF_first10s / ann_phys without R02: R2 0.33 (constant -0.10, physics 0.36)
+17:29:44 INFO    influence check log10_V / ann without R24: R2 0.33 (constant -0.16, physics 0.18)
+17:29:44 INFO    influence check log10_width / gpr_phys without R12: R2 0.05 (constant -0.10, physics 0.10)
+17:29:50 INFO    influence check log10_k / ann_phys without R11: R2 -0.32 (constant -0.17, physics -0.17)
+17:29:50 INFO    selection:
+      target selected_ml final_model
+COF_first10s    ann_phys     physics
+     COF_end                 physics
+     log10_V         ann     physics
+ log10_width    gpr_phys     physics
+     log10_k    ann_phys     physics
+17:29:53 INFO    interpretation tables done in 2 s
+17:29:53 INFO    perm: using cache perm_2da06d2f981a.pkl
+17:29:53 INFO    === stage evaluate done in 27.5 s ===
+17:29:53 INFO    === stage compare ===
+17:29:53 INFO    C1: Use COF_first10s: it follows the adhesion law best among the definitions (P1 R² +0.36, P2 +0.23; end-of-run COF +0.08) with signal-to-noise 2.2; the instrument mean reads 13 % low and its ratio to ours falls with frequency (r = -0.70).
+17:29:53 INFO    C2: Use the most-worn valid location with robust levelling: 16 runs measurable with an LOD, replicate SD 0.07 dex, Archard R² P1 +0.29 / P2 +0.15; the old mean-of-locations, plain-levelling measure gives 0.34 dex and R² +0.08 / +0.01. Exponents: V ~ L^0.96 [0.41, 1.59] S^-0.07 [-1.32, 1.61] (Archard: 1, 1). The TA depth rule scores a higher R² (+0.52) only because it drops the shallow part of every groove: runs at <= 25 N keep a median 11 % of their groove, runs at >= 60 N 91 %, which inflates the load exponent to 1.9; it is not a volume.
+17:29:53 INFO    kfrag: using cache kfrag_36cf0488d9ff.pkl
+17:29:53 INFO    C3: COF first 10 s: final = physics law (selected ML: ANN + physics); COF end: final = physics law (selected ML: none); log10 V: final = physics law (selected ML: ANN); log10 width: final = physics law (selected ML: GPR + physics); log10 k: final = physics law (selected ML: ANN + physics).
+17:29:53 INFO    c4: using cache c4_82e3e2602057.pkl
+17:29:53 INFO    C4: Replace the old pipeline. COF: the old ANN on end-of-run COF scores R² +0.40 in P1 but +0.00 on the training runs (P2); the final model on COF_first10s scores +0.36 / +0.23 with two parameters. Wear: R² -0.48 / -0.47 (ANN on mean-of-locations k, plain levelling, replicate SD 0.34 dex) -> +0.29 / +0.15 (final model on the most-worn-location volume, replicate SD 0.07 dex).
+17:29:53 INFO    c5: using cache c5_be1c2f4e3d95.pkl
+17:29:53 INFO    C5: Do not use the literature data: paper COF ~ L^+0.52 v^-0.69 vs ours L^-0.09 v^-0.05; log10_COF: best with paper data GPR + study flag R² +0.24 vs ours alone +0.28; log10_k: best with paper data pooled + study offset: power law R² -0.31 vs ours alone +0.41. The published COF (0.002-0.007) and volumes (up to 1620 mm³ in 200 s) are implausible as printed.
+17:29:53 INFO    c6: using cache c6_547df76d0a92.pkl
+17:29:53 INFO    C6: Do not use the TA script as written: 25 of 92 scans are read along the track, and the R04/R14/R20 replicates spread 30x in k (SD 0.84 dex); fixed copy 0.13 dex, ours 0.07 dex (R14/R20 only). Archard R² (P1): original -0.03, fixed -0.19, ours +0.29.
+17:29:53 INFO    === stage compare done in 0.7 s ===
+17:29:53 INFO    === stage figures ===
+17:29:54 INFO    figure fig01_pipeline
+17:29:54 INFO    figure fig02_test_matrix
+17:29:55 INFO    figure fig03_raw_signal
+17:29:56 INFO    figure fig04_cof_time
+17:29:57 INFO    figure fig05_height_map
+17:29:58 INFO    figure fig06_robust_levelling
+17:29:59 INFO    figure fig07_wear_per_run
+17:29:59 INFO    figure fig08_c1_cof_definitions
+17:30:00 INFO    figure fig09_c2_wear_measures
+17:30:00 INFO    figure fig10_physics_fits
+17:30:01 INFO    figure fig11_c3_models
+17:30:01 INFO    figure fig12_stability
+17:30:02 INFO    figure fig13_parity
+17:30:02 INFO    figure fig14_residuals
+17:30:03 INFO    figure fig15_confusion
+17:30:03 INFO    figure fig16_uncertainty
+17:30:04 INFO    figure fig17_interpretation
+17:30:05 INFO    figure fig18_surfaces
+17:30:05 INFO    figure fig19_c4_old_vs_final
+17:30:06 INFO    figure fig20_c5_literature
+17:30:06 INFO    figure fig21_c6_ta_script
+17:30:07 INFO    figure fig22_p3_holdout
+17:30:07 INFO    === stage figures done in 13.4 s ===
+17:30:07 INFO    === stage report ===
+17:30:20 INFO    === stage report done in 13.6 s ===
+17:30:20 INFO    === stage readme ===
+17:30:20 INFO    === stage readme done in 0.1 s ===
+17:30:20 INFO    run_all finished in 1.4 min
+17:30:28 INFO    run_all: stages readme; testdata = /Users/ananyay/Desktop/323_project/final version/testdata
+17:30:28 INFO    === stage readme ===
+17:30:28 INFO    === stage readme done in 0.1 s ===
+17:30:28 INFO    run_all finished in 0.0 min
+17:30:33 INFO    run_all: stages compare; testdata = /Users/ananyay/Desktop/323_project/final version/testdata
+17:30:33 INFO    === stage compare ===
+17:30:33 INFO    C1: Use COF_first10s: it follows the adhesion law best among the definitions (P1 R² +0.36, P2 +0.23; end-of-run COF +0.08) with signal-to-noise 2.2; the instrument mean reads 13 % low and its ratio to ours falls with frequency (r = -0.70).
+17:30:33 INFO    C2: Use the most-worn valid location with robust levelling: 16 runs measurable with an LOD, replicate SD 0.07 dex, Archard R² P1 +0.29 / P2 +0.15; the old mean-of-locations, plain-levelling measure gives 0.34 dex and R² +0.08 / +0.01. Exponents: V ~ L^0.96 [0.41, 1.59] S^-0.07 [-1.32, 1.61] (Archard: 1, 1). The TA depth rule scores a higher R² (+0.52) only because it drops the shallow part of every groove: runs at <= 25 N keep a median 11 % of their groove, runs at >= 60 N 91 %, which inflates the load exponent to 1.9; it is not a volume.
+17:30:34 INFO    kfrag: using cache kfrag_36cf0488d9ff.pkl
+17:30:34 INFO    C3: COF first 10 s: final = physics law (selected ML: ANN + physics); COF end: final = physics law (selected ML: none); log10 V: final = physics law (selected ML: ANN); log10 width: final = physics law (selected ML: GPR + physics); log10 k: final = physics law (selected ML: ANN + physics).
+17:30:34 INFO    c4: using cache c4_82e3e2602057.pkl
+17:30:34 INFO    C4: Replace the old pipeline. COF: the old ANN on end-of-run COF scores R² +0.40 in P1 but +0.00 on the training runs (P2); the final model on COF_first10s scores +0.36 / +0.23 with two parameters. Wear: R² -0.48 / -0.47 (ANN on mean-of-locations k, plain levelling, replicate SD 0.34 dex) -> +0.29 / +0.15 (final model on the most-worn-location volume, replicate SD 0.07 dex).
+17:30:34 INFO    c5: using cache c5_be1c2f4e3d95.pkl
+17:30:34 INFO    C5: Do not use the literature data: paper COF ~ L^+0.52 v^-0.69 vs ours L^-0.09 v^-0.05; log10_COF: best with paper data GPR + study flag R² +0.24 vs ours alone +0.28; log10_k: best with paper data pooled + study offset: power law R² -0.31 vs ours alone +0.41. The published COF (0.002-0.007) and volumes (up to 1620 mm³ in 200 s) are implausible as printed.
+17:30:34 INFO    c6: using cache c6_547df76d0a92.pkl
+17:30:34 INFO    C6: Do not use the TA script as written: 25 of 92 scans are read along the track, and the R04/R14/R20 replicates spread 30x in k (SD 0.84 dex); fixed copy 0.13 dex, ours 0.07 dex (R14/R20 only). Archard R² (P1): original -0.03, fixed -0.19, ours +0.29.
+17:30:34 INFO    === stage compare done in 0.6 s ===
+17:30:34 INFO    run_all finished in 0.0 min
+17:30:43 INFO    run_all: stages extract; testdata = /Users/ananyay/Desktop/323_project/final version/testdata
+17:30:44 INFO    === stage extract ===
+17:30:44 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/final version/testdata
+17:30:44 INFO    extraction: 0 cached, 23 to compute
+17:31:07 INFO      R01 extracted in 6.4 s
+17:31:07 INFO      R02 extracted in 7.5 s
+17:31:07 INFO      R04 extracted in 6.5 s
+17:31:07 INFO      R05 extracted in 7.2 s
+17:31:07 INFO      R06 extracted in 7.2 s
+17:31:07 INFO      R07 extracted in 7.9 s
+17:31:07 INFO      R08 extracted in 6.4 s
+17:31:07 INFO      R09 extracted in 7.1 s
+17:31:07 INFO      R10 extracted in 7.4 s
+17:31:07 INFO      R11 extracted in 5.9 s
+17:31:07 INFO      R12 extracted in 5.2 s
+17:31:07 INFO      R13 extracted in 8.6 s
+17:31:07 INFO      R14 extracted in 7.7 s
+17:31:07 INFO      R17 extracted in 7.2 s
+17:31:07 INFO      R19 extracted in 5.7 s
+17:31:07 INFO      R20 extracted in 8.0 s
+17:31:07 INFO      R21 extracted in 6.9 s
+17:31:07 INFO      R22 extracted in 6.0 s
+17:31:07 INFO      R24 extracted in 6.5 s
+17:31:07 INFO      R25 extracted in 6.5 s
+17:31:07 INFO      R26 extracted in 5.2 s
+17:31:07 INFO      R28 extracted in 5.4 s
+17:31:07 INFO      R29 extracted in 4.4 s
+17:31:07 INFO    === stage extract done in 23.4 s ===
+17:31:07 INFO    run_all finished in 0.4 min
+17:32:33 INFO    run_all: stages extract; testdata = /Users/ananyay/Desktop/323_project/final version/testdata
+17:32:34 INFO    === stage extract ===
+17:32:34 INFO    found 23 run folders in /Users/ananyay/Desktop/323_project/final version/testdata
+17:32:34 INFO    extraction: 0 cached, 23 to compute
+17:32:56 INFO      R01 extracted in 6.3 s
+17:32:56 INFO      R02 extracted in 7.6 s
+17:32:56 INFO      R04 extracted in 6.5 s
+17:32:56 INFO      R05 extracted in 7.2 s
+17:32:56 INFO      R06 extracted in 7.0 s
+17:32:56 INFO      R07 extracted in 7.8 s
+17:32:56 INFO      R08 extracted in 6.5 s
+17:32:56 INFO      R09 extracted in 7.1 s
+17:32:56 INFO      R10 extracted in 6.6 s
+17:32:56 INFO      R11 extracted in 5.1 s
+17:32:56 INFO      R12 extracted in 4.4 s
+17:32:56 INFO      R13 extracted in 7.3 s
+17:32:56 INFO      R14 extracted in 6.6 s
+17:32:56 INFO      R17 extracted in 6.0 s
+17:32:56 INFO      R19 extracted in 4.9 s
+17:32:56 INFO      R20 extracted in 7.1 s
+17:32:56 INFO      R21 extracted in 6.5 s
+17:32:56 INFO      R22 extracted in 5.7 s
+17:32:56 INFO      R24 extracted in 6.4 s
+17:32:56 INFO      R25 extracted in 6.6 s
+17:32:56 INFO      R26 extracted in 5.4 s
+17:32:56 INFO      R28 extracted in 5.6 s
+17:32:56 INFO      R29 extracted in 4.9 s
+17:32:56 INFO    === stage extract done in 22.6 s ===
+17:32:56 INFO    run_all finished in 0.4 min

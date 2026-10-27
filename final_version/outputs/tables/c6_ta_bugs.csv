@@ -1,0 +1,8 @@
+bug,description,evidence
+1,Orientation chosen from the unlevelled map (tilt decides),"25 of 92 scans transposed, so the 'profile' runs along the track. R24.bcrf: transposed, reported depth 22.5 um (a pit), groove area 4352 um^2; with the correct axis the same code gives depth 7.4 um, groove area 0 um^2"
+2,Points shallower than the cutoff zeroed one by one,"10 scans (correct axis) have groove area 0 although the depth is >= 3 um, e.g. R05b_13.bcrf (3.4 um), R11.bcrf (4.2 um), R13.bcrf (4.1 um), R14_a.bcrf (5.9 um)"
+3,Pile-up summed over the whole image outside the groove,median TA pile-up / band pile-up = 1.5 over 65 valid scans (texture peaks counted as pile-up)
+4,Shoulder (reference) rows never checked to be unworn,"in 23 of 90 scans with a track, the worn band reaches into the outer 15 % rows that the TA uses as the unworn baseline"
+5,Scan picked by the deepest point (texture valleys),the deepest-point scan differs from the largest-groove valid scan in 12 of 20 runs with a detected groove
+6,COF = mean of the instrument |Fx|/Fz channel; deceleration second not trimmed,"TA COF / offset-free COF = 0.873 on average (13 % low); the ratio falls with frequency (r = -0.70, p = 0.000)"
+7,Hard-coded R01 parameters; friction log = first *.csv; outputs written into the data folder,"R04 with the default arguments (10 N, 6 Hz, 120 s): k = 6.53e-06 instead of 2.33e-06 mm^3/(N m) (2.8x); run_pipeline() writes all_scans_breakdown.csv and single_scan_summary.csv into each run folder (avoided here)"
